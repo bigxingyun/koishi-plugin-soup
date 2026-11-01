@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bigxingyun/koishi-plugin-situation-puzzle/schema/tale.schema.json",
+  "title": "Situation Puzzle Tale / 海龟汤汤文件",
+  "type": "object",
+  "required": ["taleId", "title", "surface", "answer"],
+  "additionalProperties": false,
+  "properties": {
+    "taleId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$",
+      "description": "全局唯一 ID，小写字母/数字/连字符"
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "difficulty": { "enum": ["easy", "normal", "hard"], "default": "normal" },
+    "surface": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 8000,
+      "description": "汤面。允许 Markdown，不允许 HTML——导入时会被清洗"
+    },
+    "answer": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 10000,
+      "description": "汤底。不得包含汤面原句，导入时会做泄底检测"
+    },
+    "keys": {
+      "type": "array",
+      "maxItems": 8,
+      "description": "关键要素；缺省时评分退化为纯语义分",
+      "items": {
+        "type": "object",
+        "required": ["text"],
+        "additionalProperties": false,
+        "properties": {
+          "text": { "type": "string", "minLength": 2, "maxLength": 120 },
+          "weight": { "type": "number", "minimum": 0.1, "maximum": 5, "default": 1 }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "type": "string", "maxLength": 16 }
+    },
+    "author": { "type": "string", "maxLength": 64 },
+    "newspaper": {
+      "type": "object",
+      "description": "版面覆盖：layout-plan.schema.json 的字段子集；存在时跳过 AI 生成",
+      "additionalProperties": true
+    }
+  }
+}
