@@ -8,12 +8,13 @@ export default {
     taleIncomplete: '该汤缺少汤底或汤面，不能开局。',
 
     opened: '【{0}】难度：{1}\n\n{2}',
-    openedRules: '本场规则：{0} · 提交 {1} 次{2} · 通过线 {3}%\n提问：海龟汤 问 你的问题\n提交：海龟汤 提交 你的推理',
+    openedRules: '本场规则：{0} · 提交 {1} 次{2} · 通过线 {3}%\n提问：海龟汤 问 你的问题\n提交：海龟汤 提交 你的推理\n主持人只回答：是 / 不是 / 无关。',
     quotaUnlimited: '提问不限',
     quotaLimited: '提问 {0} 次',
     joining: '限时 {0} 秒加入本场，个人可提交 {1} 次。发送「海龟汤 加入」参与。',
     joined: '{0} 已加入（{1}/{2}）。',
     joinClosed: '本场加入已截止。',
+    joinNotNeeded: '本场不用加入，直接「海龟汤 问 你的问题」或「海龟汤 提交 你的推理」就好。',
     joinDuplicate: '你已经在本场中了。',
     notJoined: '请先发送「海龟汤 加入」加入本场，再提交推理。',
     joinFull: '本场人数已满（{0} 人）。',
@@ -39,7 +40,7 @@ export default {
     commentNear: '很接近了，还差关键细节。',
     scoreDetail: '要素命中：{0}',
 
-    settleWin: '🎉 {0} 猜中了！相似度 {1}%。',
+    settleWin: '🎉 {0} 猜中了！',
     settleEmpty: '提交次数已用完，本场结束。',
     settleManual: '本场由 {0} 提前结束。',
     settleTimeout: '本场已超时结束。',
@@ -49,12 +50,15 @@ export default {
 
     status: '《{0}》· {1}\n提问 {2}/{3} · 提交 {4}/{5} · 通过线 {6}% · 已进行 {7}',
 
-    aiNotConfigured: '尚未配置 AI 服务，请联系管理员填写 apiKey。',
+    aiNotConfigured: '尚未配置 AI 服务（apiKey 为空），没法判题。请联系管理员在插件配置里填写。',
     aiDailyLimit: '今日 AI 调用已达上限，暂时无法判定。',
     aiAuthFailed: 'AI 服务鉴权失败，请管理员检查 apiKey。',
     aiModelInvalid: 'AI 模型配置有误，请管理员检查 model。',
-    aiUnreachable: '主持人走神了，请稍后重试（本次不计次数）。',
+    aiUnreachable: 'AI 暂时没响应，请稍后再问（本次不计次数）。',
     aiEmptyQuestion: '请描述你要问的问题。',
+    aiEmptyGuess: '请写下你的推理，例如「海龟汤 提交 她其实没死」。',
+    aiAborted: 'AI 没连通（{0}），这锅先散了，本场不计。\n—— 汤底 ——\n{1}',
+    unknownError: '出了点问题，这次操作没成功。',
 
     bindRequested: '已生成绑定密钥，请到 Koishi 控制台日志中查看，{0} 分钟内发送「海龟汤 主人 绑定 <密钥>」完成绑定。',
     bindSuccess: '绑定成功，你现在是本 bot 的主人。',
@@ -67,9 +71,10 @@ export default {
     noPermission: '你没有权限执行这个操作。',
     legacyCommand: '「海龟汤 {0}」已调整为「海龟汤 {1}」。',
 
-    libraryHeader: '汤库（共 {0} 条，第 {1}/{2} 页）',
+    libraryHeader: '汤库（共 {0} 条）',
     libraryItem: '{0}. {1}　[{2}]　已玩 {3} 次',
     libraryItemDisabled: '（已停用）',
+    libraryTruncated: '…… 另有 {0} 条未显示，用「海龟汤 汤库 列表 -k 关键词」筛选。',
     libraryUpdated: '汤库已重载：新增 {0}，更新 {1}，跳过 {2}，失败 {3}。',
     libraryImportFailed: '导入失败：\n{0}',
     taleEnabled: '已启用《{0}》。',

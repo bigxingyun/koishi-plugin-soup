@@ -2,7 +2,7 @@ import type { Accent } from './config'
 
 export type Difficulty = 'easy' | 'normal' | 'hard'
 export type SessionStatus = 'joining' | 'running' | 'settled'
-export type EndReason = 'win' | 'empty' | 'manual' | 'timeout' | 'cancel'
+export type EndReason = 'win' | 'empty' | 'manual' | 'timeout' | 'cancel' | 'error'
 export type Verdict = 'yes' | 'no' | 'irrelevant' | 'partial'
 export type RenderKind = 'image' | 'text'
 
@@ -15,6 +15,8 @@ export interface TaleKey {
 /** 报纸版面规划：AI 只产这个结构，排版由代码计算 */
 export interface LayoutPlan {
   version?: number
+  /** 生成时间戳，用于 layoutPlanMaxAge 过期重算 */
+  generatedAt?: number
   masthead?: { name?: string; en?: string }
   issue?: number
   pages?: number

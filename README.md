@@ -82,8 +82,10 @@ npm i @bigxingyun/koishi-plugin-soup
 提交 榜一分尸了   # 提交 = 海龟汤 提交
 ```
 
-或者**直接引用** bot 发的那张报纸，输入你的问题即可——不用再打指令。指令始终优先，`海龟汤 状态` 这类不会被当成提问。
+或者**引用 bot 发的那张报纸**，输入你的问题即可——不用再打指令。指令始终优先，`海龟汤 状态` 这类不会被当成提问。
 
+> 只认**引用 bot 自己的消息**：引用别人的话不会有反应（群里每天都在回复别人，否则 bot 会到处抢答）。引用一张图、一个表情也不会触发。
+>
 > 短别名默认开启；若 `问` / `提交` 已被别的插件占用，会自动跳过并在日志里记一条 debug。`引用即提问` 也能在配置里关掉。
 
 ## 汤文件格式
@@ -136,14 +138,23 @@ npm i @bigxingyun/koishi-plugin-soup
 | `renderFormat` | `jpg` | PNG 体积约为 JPEG 的 6 倍 |
 | `seedBundled` | `true` | 汤库为空时自动铺 3 锅内置样例汤 |
 | `shortCommands` | `true` | 注册短别名：汤 / 问 / 提交 / 开局 |
-| `quoteAsk` | `true` | 引用 bot 消息时，直接当提问处理 |
+| `quoteAsk` | `true` | 引用 **bot 自己的**消息时，文字直接当提问 |
+| `abortOnAiFailure` | `true` | AI 判定失败就散场并交底；关掉则保留场次、提示重试 |
+| `renderTheme` | `newspaper` | `newspaper` 做旧报纸 / `plain` 干净排版（可按频道切） |
+| `historyRetentionDays` | `30` | 场次与问答明细保留天数，过期每 6 小时清一次 |
 
-全部 44 项配置及默认值见[需求规格](https://github.com/bigxingyun/koishi-plugin-soup/blob/main/需求分析.md) §7。
+全部 56 项配置及默认值见[需求规格](https://github.com/bigxingyun/koishi-plugin-soup/blob/main/需求分析.md) §7。
 
 ## 常见问题
 
 **Q：没配 Key 能用吗？**
-能开局、能看汤面，但 `问` 和 `提交` 会提示「尚未配置 AI 服务」。汤库管理、配额、结算逻辑都不依赖 AI。
+能管理汤库、看汤面，但**不能开局**——判定器是这局游戏的前提，`海龟汤 开局` 会直接提示去填 `apiKey`（避免开出一局注定散场的汤）。
+
+**Q：AI 挂了会怎样？**
+默认**当场散场并公布汤底**：「AI 没连通（连不上 API 站点），这锅先散了，本场不计。」不会让你对着一个答不了题的场次干等。想保留场次就关掉 `abortOnAiFailure`。
+
+**Q：群里回复别人也会被当成提问吗？**
+不会。只认引用 **bot 自己发出的**消息，引用别人的话、引用一张图都不会触发。
 
 **Q：没装 puppeteer 会怎样？**
 一直发纯文本，功能完整。装了但渲染失败（比如容器缺中文字体）也会自动降级，不会报错给玩家。
@@ -162,7 +173,7 @@ npm i @bigxingyun/koishi-plugin-soup
 ```sh
 npm install
 npm run build      # 编译到 lib/
-npm test           # 41 个用例：单元 + mock 集成 + 渲染 + 路由 + 出图
+npm test           # 79 个用例：单元 + mock 集成 + 渲染 + 路由 + 出图 + 稳定性
 npm run typecheck
 ```
 
@@ -177,7 +188,7 @@ npm run verify:render      # 或：$env:CHROME_PATH="D:\chrome\chrome.exe"; node
 ```
 
 脚本会起一个无头 Koishi 应用（mock 适配器 + 内存数据库 + `@koishijs/plugin-http` + `koishi-plugin-puppeteer`），
-自动发送一次 `海龟汤 开局`，把插件**实际发出**的图片落到 `docs/verify/real-render.jpg`；没有收到图片就以非零码退出。
+自动发送一次 `海龟汤 开局`，把插件**实际发出**的图片落到 `docs/verify/`：`real-render.jpg`（做旧报纸）、`plain-render.jpg`（`renderTheme: plain`）；没有收到图片就以非零码退出。
 
 > 两个只在裸 Context 里才会遇到的坑：`koishi-plugin-puppeteer` 声明了 `inject = ['http']`，必须先装
 > `@koishijs/plugin-http`；另外它提供的服务在 `ready` 之后才真正就绪，脚本里要等一会儿再发消息。
@@ -198,6 +209,31 @@ npm i @bigxingyun/koishi-plugin-soup@latest    # 或在控制台「插件市场�
 ```
 
 升级后**重启 Koishi** 生效。数据不用手动迁移：表结构走 `ctx.model.extend` 自动补列，老数据目录也会被自动识别（见 0.1.1）。
+
+### 0.2.3 — 2026-11-01
+
+**修复**
+
+- **引用别人的消息也会被当成提问**：0.2.1 只判断「消息里有没有引用」，群里谁回复谁都能触发一次提问，AI 一挂就满屏「主持人走神了」。现在只认**引用 bot 自己发出的消息**（先看被引用消息的作者，平台不提供时再反查一次），并且只取纯文本——引用一张图、一个表情不再触发
+- 提前开局（`海龟汤 开始`）会把**超时计时器一起撤掉**，导致提前开局的场次永远不会超时
+- 最后一次提交也没中时场次会一直挂着：现在当场收场并公布汤底
+- 超时、无人加入这两种结束方式**完全静默**，玩家看不到任何结果；现在会在频道里说明并交底
+- 结算统计里的「N 人参与」写死成 1，现在按发起人 + 加入 + 提问 + 提交的真实用户去重统计
+- 汤库列表谎报页码（永远「第 1/1 页」），超过 20 条也不提示
+- 图片缓存的 key 漏了个人配额 / 标签 / 主题 / 日期，改完规则会命中旧图，图上规则与实际不符
+- `renderWidth` 只改了截图视口，纸张宽度写死 700px；现在真的跟着配置走，窄版自动退单栏
+
+**变更**
+
+- **AI 判定失败不再让玩家「稍后重试」，而是直接散场并公布汤底**（`AI 没连通（原因），这锅先散了，本场不计。`）。关掉 `abortOnAiFailure` 可回到「保留场次、本次不计次数」
+- 未配置 `apiKey` 时**直接拒绝开局**，不再开出一局注定散场的汤
+- 判词支持中英文归一（`是` / `否` / `无关` / `是也不是`），模型写中文不再判为解析失败
+- 补齐之前"能配但不生效"的配置：`renderTheme`（新增 plain 干净排版）、`includeHistory`、`layoutPlanMaxAge`、`historyRetentionDays`（每 6 小时清理过期场次）、`answeringHint`
+
+**其他**
+
+- 测试 64 → 79，新增稳定性用例：AI 断线散场、引用别人的消息不插话、引用图片不触发、提前开局仍超时、人数统计、中文判词
+- `npm run verify:render` 现在同时产出 `docs/verify/real-render.jpg`（做旧报纸）和 `docs/verify/plain-render.jpg`（干净排版）
 
 ### 0.2.1 — 2026-11-01
 

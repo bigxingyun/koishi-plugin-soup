@@ -113,19 +113,21 @@ test('开局：同一频道不能双开', async (t) => {
   await client.shouldReply('海龟汤 开局', /正在进行/)
 })
 
-test('配额：公共提交次数用尽后自动结算', async (t) => {
+test('配额：最后一次提交失败即收场并交底', async (t) => {
   stubFetch({ score: { points: [], semantic: 5 } })
   const app = await createApp({ defaultGuessQuota: 1, passThreshold: 0.8, guessCooldown: 0 })
   t.after(() => app.stop())
 
   const client = app.mock.client('u6')
   await client.shouldReply('海龟汤 开局', OPEN)
-  await client.shouldReply('海龟汤 提交 第一次', /相似度/)
-  await client.shouldReply('海龟汤 提交 第二次', /提交次数已用完/)
+  const [reply] = await client.receive('海龟汤 提交 第一次')
+  assert.match(String(reply), /相似度/)
+  assert.match(String(reply), /本场结束/, '最后一次机会用尽必须当场说明')
+  assert.match(String(reply), /汤底/, '收场时必须把汤底交出来')
   await client.shouldReply('海龟汤 状态', /没有进行中/)
 })
 
-test('未配置 API Key：提问给出明确提示', async (t) => {
+test('未配置 API Key：直接拒绝开局，不留空场次', async (t) => {
   const previous = process.env.DEEPSEEK_API_KEY
   delete process.env.DEEPSEEK_API_KEY
   t.after(() => {
@@ -136,8 +138,9 @@ test('未配置 API Key：提问给出明确提示', async (t) => {
   t.after(() => app.stop())
 
   const client = app.mock.client('u7')
-  await client.shouldReply('海龟汤 开局', OPEN)
-  await client.shouldReply('海龟汤 问 她是死了吗', /尚未配置 AI 服务/)
+  await client.shouldReply('海龟汤 开局', /尚未配置 AI 服务/)
+  const rows = await app.database.get('situation_puzzle_session', { channelKey: 'mock:u7' })
+  assert.equal(rows.length, 0, '没有 AI 时不应该建出场次')
 })
 
 test('主人：未绑定时管理指令被拒绝', async (t) => {

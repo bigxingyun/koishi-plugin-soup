@@ -183,22 +183,23 @@ test('DeepSeek 容错：空 content 视为失败并重试', async (t) => {
   await client.shouldReply('海龟汤 问 她笑过吗', /不是/)
 })
 
-test('DeepSeek 容错：返回非 JSON 时降级文案，不扣配额', async (t) => {
+test('DeepSeek 容错：返回非 JSON 时散场并交底，不扣配额', async (t) => {
   const site = await startFakeSite((req) => {
     if (req.url === '/models') return { body: { data: [{ id: 'deepseek-flash' }] } }
     return { body: chatBody('我觉得答案是肯定的，因为……') }
   })
   t.after(() => site.server.close())
 
-  const app = await createApp({ apiKey: 'sk-text', baseURL: site.baseURL })
+  const app = await createApp({ apiKey: 'sk-text', baseURL: site.baseURL, maxRetries: 0 })
   t.after(() => app.stop())
 
   const client = app.mock.client('n1', 'nonjson-room')
   await client.shouldReply('海龟汤 开局', [/测试之杯/, /本场规则/])
-  await client.shouldReply('海龟汤 问 她哭了吗', /走神|稍后重试/)
+  await client.shouldReply('海龟汤 问 她哭了吗', /AI 没连通[\s\S]*汤底/)
 
   const rows = await app.database.get('situation_puzzle_session', { channelKey: 'mock:nonjson-room' })
   assert.equal(rows[0].questionsUsed, 0)
+  assert.equal(rows[0].status, 'settled', '判定器不可用时不该留着一个开着的场次')
 })
 
 test('诊断：站点可达 / 模型命中 / 推理通过', async (t) => {

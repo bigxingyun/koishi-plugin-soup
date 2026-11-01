@@ -12,6 +12,7 @@ export type GameErrorCode =
   | 'no-session'
   | 'not-running'
   | 'not-joining'
+  | 'no-room'
   | 'not-joined'
   | 'full'
   | 'already-joined'
@@ -70,6 +71,8 @@ export interface GuessOutcome {
   remainingPublic: number
   detail: ScoreResult['points']
   settled: boolean
+  /** 本场提交次数就此用尽并已结算：调用方要补发汤底 */
+  exhausted: boolean
 }
 
 export interface OpenRules {
@@ -81,10 +84,16 @@ export interface OpenRules {
   joinWindow: number
 }
 
+type TimerKind = 'join' | 'duration'
+
 export class Game {
-  private timers = new Map<number, Array<() => void>>()
+  private timers = new Map<number, Array<{ kind: TimerKind; dispose: () => void }>>()
   private cooldowns = new Map<string, number>()
   private judged = new Map<number, Map<string, Verdict>>()
+  /** 每个频道最近一次会话：定时器（超时/流局）要靠它把结果播出去 */
+  private senders = new Map<string, Session>()
+  /** 开局串行化：先查后建之间有空档，两个并发开局会同时建出两场 */
+  private queue = new Map<string, Promise<unknown>>()
 
   constructor(
     private ctx: Context,
@@ -109,62 +118,77 @@ export class Game {
     return row
   }
 
+  /** 记下频道里最近一个会话，供定时任务回话 */
+  remember(session: Session): void {
+    if (!session.channelId) return
+    const key = channelKeyOf(session)
+    this.senders.set(key, session)
+    if (this.senders.size > 200) {
+      const oldest = this.senders.keys().next().value
+      if (oldest) this.senders.delete(oldest)
+    }
+  }
+
   // ------------------------------------------------------------------ 开局
   async open(channelKey: string, tale: Tale, openerId: string, guildId: string, rules: OpenRules): Promise<GameSession> {
-    const busy = await this.active(channelKey)
-    if (busy) throw new GameError('busy', { title: busy.taleSnapshot?.title ?? '' })
+    return this.withLock(channelKey, async () => {
+      const busy = await this.active(channelKey)
+      if (busy) throw new GameError('busy', { title: busy.taleSnapshot?.title ?? '' })
 
-    const snapshot: TaleSnapshot = {
-      taleId: tale.taleId,
-      title: tale.title,
-      difficulty: tale.difficulty,
-      surface: tale.surface,
-      answer: tale.answer,
-      keys: tale.keys ?? [],
-    }
+      const snapshot: TaleSnapshot = {
+        taleId: tale.taleId,
+        title: tale.title,
+        difficulty: tale.difficulty,
+        surface: tale.surface,
+        answer: tale.answer,
+        keys: tale.keys ?? [],
+      }
 
-    const joining = rules.personalGuessQuota > 0
-    const now = new Date()
+      const joining = rules.personalGuessQuota > 0
+      const now = new Date()
 
-    const row = await this.ctx.database.create(TABLES.session, {
-      channelKey,
-      platform: channelKey.split(':')[0],
-      channelId: channelKey.split(':').slice(1).join(':'),
-      guildId,
-      taleRowId: tale.id,
-      taleSnapshot: snapshot,
-      status: joining ? 'joining' : 'running',
-      endReason: '',
-      renderMode: 'text',
-      openerId,
-      winnerId: '',
-      questionQuota: rules.questionQuota,
-      questionsUsed: 0,
-      guessQuota: rules.guessQuota,
-      guessesUsed: 0,
-      personalGuessQuota: rules.personalGuessQuota,
-      passThreshold: rules.passThreshold,
-      maxDuration: rules.maxDuration,
-      startedAt: now,
-      settledAt: new Date(0),
+      const row = await this.ctx.database.create(TABLES.session, {
+        channelKey,
+        platform: channelKey.split(':')[0],
+        channelId: channelKey.split(':').slice(1).join(':'),
+        guildId,
+        taleRowId: tale.id,
+        taleSnapshot: snapshot,
+        status: joining ? 'joining' : 'running',
+        endReason: '',
+        renderMode: 'text',
+        openerId,
+        winnerId: '',
+        questionQuota: rules.questionQuota,
+        questionsUsed: 0,
+        guessQuota: rules.guessQuota,
+        guessesUsed: 0,
+        personalGuessQuota: rules.personalGuessQuota,
+        passThreshold: rules.passThreshold,
+        maxDuration: rules.maxDuration,
+        startedAt: now,
+        settledAt: new Date(0),
+      })
+
+      await this.ctx.database.set(TABLES.tale, tale.id, (row2) => ({
+        playedCount: $.add(row2.playedCount, 1),
+      }))
+
+      if (joining) {
+        this.schedule(row.id, 'join', rules.joinWindow * 1000, () => this.finishJoining(row.id))
+      }
+      if (rules.maxDuration > 0) {
+        this.schedule(row.id, 'duration', rules.maxDuration * 1000, () => this.expire(row.id))
+      }
+
+      return row
     })
-
-    await this.ctx.database.set(TABLES.tale, tale.id, (row2) => ({
-      playedCount: $.add(row2.playedCount, 1),
-    }))
-
-    if (joining) {
-      this.schedule(row.id, rules.joinWindow * 1000, () => this.finishJoining(row.id))
-    }
-    if (rules.maxDuration > 0) {
-      this.schedule(row.id, rules.maxDuration * 1000, () => this.settle(row.id, 'timeout'))
-    }
-
-    return row
   }
 
   // ------------------------------------------------------------------ 加入
   async join(session: GameSession, userId: string): Promise<{ joined: number; max: number }> {
+    // 非房间模式本来就不用加入，别让玩家看到「本场已结束」这种吓人的话
+    if (session.personalGuessQuota <= 0) throw new GameError('no-room')
     if (session.status !== 'joining') throw new GameError('not-joining')
 
     const existing = await this.ctx.database.get(TABLES.player, { sessionId: session.id, userId })
@@ -190,10 +214,12 @@ export class Game {
 
     const players = await this.ctx.database.get(TABLES.player, { sessionId })
     if (!players.length) {
-      await this.settle(sessionId, 'cancel')
+      const settled = await this.settle(sessionId, 'cancel')
+      if (settled) await this.notify(row.channelKey, this.text('settleCancel'))
       return
     }
     await this.ctx.database.set(TABLES.session, { id: sessionId, status: 'joining' }, { status: 'running' })
+    this.clearTimers(sessionId, 'join')
   }
 
   /** 发起人在窗口内提前开始 */
@@ -202,7 +228,18 @@ export class Game {
     const players = await this.ctx.database.get(TABLES.player, { sessionId: session.id })
     if (!players.length) throw new GameError('not-joined')
     await this.ctx.database.set(TABLES.session, { id: session.id, status: 'joining' }, { status: 'running' })
-    this.clearTimers(session.id)
+    // 只撤加入计时器；时长计时器得留着，否则提前开局的场次永远不会超时
+    this.clearTimers(session.id, 'join')
+  }
+
+  /** 超时结束：结算 + 公布汤底，不能悄无声息地收场 */
+  private async expire(sessionId: number): Promise<void> {
+    const [row] = await this.ctx.database.get(TABLES.session, sessionId)
+    if (!row) return
+    const settled = await this.settle(sessionId, 'timeout')
+    if (!settled) return
+    await this.notify(row.channelKey, this.text('settleTimeout'))
+    await this.notify(row.channelKey, this.answerText(row.taleSnapshot.answer))
   }
 
   // ------------------------------------------------------------------ 提问
@@ -227,14 +264,15 @@ export class Game {
     }
 
     if (session.questionQuota > 0 && session.questionsUsed >= session.questionQuota) {
-      throw new GameError('quota-question', { remaining: 0 })
+      throw new GameError('quota-question', { remaining: this.guessRemaining(session) })
     }
 
     let judged
     try {
-      judged = await this.ai.judge(question, session.taleSnapshot.answer)
+      const history = this.config.includeHistory ? await this.recentVerdicts(session.id) : []
+      judged = await this.ai.judge(question, session.taleSnapshot.answer, history)
     } catch (error) {
-      throw this.aiError(error)
+      throw await this.aiFailure(session, error)
     }
 
     if (!this.config.allowPartialAnswer && judged.verdict === 'partial') {
@@ -267,6 +305,19 @@ export class Game {
     }
   }
 
+  /** 已确认的判词：开了 includeHistory 才用，喂给模型保持前后一致 */
+  private async recentVerdicts(sessionId: number): Promise<Array<{ q: string; v: string }>> {
+    try {
+      const rows = await this.ctx.database.get(TABLES.question, { sessionId })
+      return rows
+        .filter((row) => ['yes', 'no', 'irrelevant', 'partial'].includes(row.verdict))
+        .slice(-12)
+        .map((row) => ({ q: row.content.slice(0, 80), v: row.verdict }))
+    } catch {
+      return []
+    }
+  }
+
   private questionRemaining(session: GameSession): number {
     if (session.questionQuota <= 0) return -1
     return Math.max(session.questionQuota - session.questionsUsed, 0)
@@ -278,7 +329,12 @@ export class Game {
     const result = await this.ctx.database.set(TABLES.session, query, (row) => ({
       questionsUsed: $.add(row.questionsUsed, 1),
     }))
-    if (!result.matched) throw new GameError('quota-question', { remaining: 0 })
+    if (!result.matched) throw new GameError('quota-question', { remaining: this.guessRemaining(session) })
+  }
+
+  /** 「提问用完了但还能提交几次」——提示语里的数字，不能永远写 0 */
+  private guessRemaining(session: GameSession): number {
+    return Math.max(session.guessQuota - session.guessesUsed, 0)
   }
 
   // ------------------------------------------------------------------ 提交
@@ -301,25 +357,21 @@ export class Game {
 
     const publicExhausted = session.guessesUsed >= session.guessQuota
     if (quotaSource === 'public' && publicExhausted) {
-      await this.settle(session.id, 'empty')
-      throw new GameError('quota-guess', { settled: true })
+      throw new GameError('quota-guess', { settled: false })
     }
 
     let scored: ScoreResult
     try {
       scored = await this.ai.score(content, session.taleSnapshot.answer, session.taleSnapshot.keys ?? [])
     } catch (error) {
-      throw this.aiError(error)
+      throw await this.aiFailure(session, error)
     }
 
     const threshold = Math.round(session.passThreshold * 100)
     const passed = scored.score >= threshold
 
     const consumed = await this.consumeGuess(session, userId, quotaSource)
-    if (!consumed) {
-      await this.settle(session.id, 'empty')
-      throw new GameError('quota-guess', { settled: true })
-    }
+    if (!consumed) throw new GameError('quota-guess', { settled: false })
     this.touchCooldown(cooldownKey)
 
     try {
@@ -339,20 +391,27 @@ export class Game {
       this.logger.debug('提交落库失败：%s', (error as Error).message)
     }
 
+    const players = await this.ctx.database.get(TABLES.player, { sessionId: session.id, userId })
+    const personalUsed = players[0]?.personalGuessUsed ?? 0
+    const remainingPersonal = Math.max(session.personalGuessQuota - personalUsed, 0)
+    const remainingPublic = Math.max(session.guessQuota - session.guessesUsed - (quotaSource === 'public' ? 1 : 0), 0)
+
     let settled = false
     if (passed) settled = await this.settle(session.id, 'win', userId)
 
-    const players = await this.ctx.database.get(TABLES.player, { sessionId: session.id, userId })
-    const personalUsed = players[0]?.personalGuessUsed ?? 0
+    // 最后一次提交也没中：当场收场并公布汤底，别让场次挂在那里没人管
+    const exhausted = !passed && remainingPersonal <= 0 && remainingPublic <= 0
+    if (exhausted) settled = (await this.settle(session.id, 'empty')) || settled
 
     return {
       score: scored.score,
       passed,
       quotaSource,
-      remainingPersonal: Math.max(session.personalGuessQuota - personalUsed, 0),
-      remainingPublic: Math.max(session.guessQuota - session.guessesUsed - (quotaSource === 'public' ? 1 : 0), 0),
+      remainingPersonal,
+      remainingPublic,
       detail: scored.points,
       settled,
+      exhausted,
     }
   }
 
@@ -382,8 +441,32 @@ export class Game {
     return true
   }
 
+  /** 本场实际参与人数：发起人、加入过、提问过、提交过都算 */
+  async participants(sessionId: number): Promise<number> {
+    const users = new Set<string>()
+    try {
+      const [sessions, players, asked, guessed] = await Promise.all([
+        this.ctx.database.get(TABLES.session, sessionId),
+        this.ctx.database.get(TABLES.player, { sessionId }),
+        this.ctx.database.get(TABLES.question, { sessionId }),
+        this.ctx.database.get(TABLES.guess, { sessionId }),
+      ])
+      if (sessions[0]?.openerId) users.add(sessions[0].openerId)
+      for (const row of players) users.add(row.userId)
+      for (const row of asked) users.add(row.userId)
+      for (const row of guessed) users.add(row.userId)
+    } catch (error) {
+      this.logger.debug('参与人数统计失败：%s', (error as Error).message)
+    }
+    return Math.max(users.size, 1)
+  }
+
   // ------------------------------------------------------------------ 结算
-  async settle(sessionId: number, reason: 'win' | 'empty' | 'manual' | 'timeout' | 'cancel', winnerId = ''): Promise<boolean> {
+  async settle(
+    sessionId: number,
+    reason: 'win' | 'empty' | 'manual' | 'timeout' | 'cancel' | 'error',
+    winnerId = '',
+  ): Promise<boolean> {
     const result = await this.ctx.database.set(
       TABLES.session,
       { id: sessionId, status: { $ne: 'settled' } },
@@ -393,13 +476,43 @@ export class Game {
 
     this.clearTimers(sessionId)
     this.judged.delete(sessionId)
+    // 冷却和判词缓存都以场次 id 为前缀，不跟着清会一直留在内存里
+    for (const key of [...this.cooldowns.keys()]) {
+      if (key.startsWith(`${sessionId}:`)) this.cooldowns.delete(key)
+    }
     return true
+  }
+
+  /**
+   * AI 判定失败时的统一出口。
+   * 默认直接收场（AI 连不上，这锅汤本来也进行不下去），并把汤底告诉玩家；
+   * 关掉 abortOnAiFailure 则退回「本次不计次数，请重试」。
+   */
+  private async aiFailure(session: GameSession, error: unknown): Promise<GameError> {
+    const mapped = this.aiError(error)
+    if (!this.config.abortOnAiFailure) return mapped
+
+    const reason = String(mapped.data?.reason || 'unreachable')
+    const settled = await this.settle(session.id, 'error')
+    this.logger.warn('AI 不可用（%s），场次 %d %s', reason, session.id, settled ? '已终止' : '已结束')
+    return new GameError(mapped.code, {
+      ...mapped.data,
+      reason,
+      aborted: settled,
+      answer: session.taleSnapshot.answer,
+      title: session.taleSnapshot.title,
+    })
   }
 
   // ------------------------------------------------------------------ 版面
   async ensurePlan(tale: Tale): Promise<LayoutPlan> {
     const stored = tale.newspaper
-    if (stored && (stored as LayoutPlan).title && (stored as LayoutPlan).body?.length) {
+    const maxAge = this.config.layoutPlanMaxAge
+    const fresh = maxAge > 0
+      ? !stored?.generatedAt || Date.now() - stored.generatedAt < maxAge * 86400000
+      : true
+
+    if (stored && (stored as LayoutPlan).title && (stored as LayoutPlan).body?.length && fresh) {
       return stored as LayoutPlan
     }
     if (this.config.layoutPlanMode === 'default' || !this.ai.available) return defaultPlan(tale)
@@ -417,6 +530,7 @@ export class Game {
           this.logger.warn('版面规划疑似泄底，已改用默认版面：%s', tale.title)
           return defaultPlan(tale)
         }
+        plan.generatedAt = Date.now()
         await this.ctx.database.set(TABLES.tale, tale.id, { newspaper: plan })
         return plan
       }
@@ -427,26 +541,47 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ 工具
-  private schedule(sessionId: number, delay: number, callback: () => unknown): void {
+  private withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.queue.get(key) ?? Promise.resolve()
+    const run = previous.then(() => fn(), () => fn())
+    const tail = run.then(() => undefined, () => undefined)
+    this.queue.set(key, tail)
+    tail.then(() => {
+      if (this.queue.get(key) === tail) this.queue.delete(key)
+    })
+    return run
+  }
+
+  private schedule(sessionId: number, kind: TimerKind, delay: number, callback: () => unknown): void {
     const dispose = this.ctx.setTimeout(() => {
       Promise.resolve(callback()).catch((error) => this.logger.warn('定时任务失败：%s', (error as Error).message))
     }, delay)
     const list = this.timers.get(sessionId) ?? []
-    list.push(dispose)
+    list.push({ kind, dispose })
     this.timers.set(sessionId, list)
   }
 
-  private clearTimers(sessionId: number): void {
+  private clearTimers(sessionId: number, kind?: TimerKind): void {
     const list = this.timers.get(sessionId)
     if (!list) return
-    for (const dispose of list) dispose()
-    this.timers.delete(sessionId)
+    const keep: Array<{ kind: TimerKind; dispose: () => void }> = []
+    for (const item of list) {
+      if (kind && item.kind !== kind) {
+        keep.push(item)
+        continue
+      }
+      item.dispose()
+    }
+    if (keep.length) this.timers.set(sessionId, keep)
+    else this.timers.delete(sessionId)
   }
 
   dispose(): void {
     for (const id of [...this.timers.keys()]) this.clearTimers(id)
     this.cooldowns.clear()
     this.judged.clear()
+    this.senders.clear()
+    this.queue.clear()
   }
 
   private checkCooldown(key: string, seconds: number): void {
@@ -462,6 +597,28 @@ export class Game {
     if (seconds > 0) this.cooldowns.set(key, Date.now() + seconds * 1000)
   }
 
+  private text(key: string, params: string[] = []): string {
+    return this.ctx.i18n.text([], [`situation-puzzle.${key}`], params as any)
+  }
+
+  private answerText(answer: string): string {
+    return `${this.text('answerTitle')}\n${answer}`
+  }
+
+  /** 定时任务里没有 session，用频道最近一次会话发；发不出去只记 debug */
+  private async notify(channelKey: string, text: string): Promise<void> {
+    const session = this.senders.get(channelKey)
+    try {
+      if (session) return void (await session.send(text))
+      const platform = channelKey.slice(0, channelKey.indexOf(':'))
+      const channelId = channelKey.slice(channelKey.indexOf(':') + 1)
+      const bot = (this.ctx.bots as any).find?.((item: any) => item.platform === platform)
+      if (bot) await bot.sendMessage(channelId, text)
+    } catch (error) {
+      this.logger.debug('场次通知发送失败：%s', (error as Error).message)
+    }
+  }
+
   private aiError(error: unknown): GameError {
     if (error instanceof GameError) return error
     if (error instanceof AIError) {
@@ -471,6 +628,7 @@ export class Game {
         case 'auth': return new GameError('ai-error', { reason: 'auth' })
         case 'model': return new GameError('ai-error', { reason: 'model' })
         case 'leak': return new GameError('ai-error', { reason: 'leak' })
+        case 'timeout': return new GameError('ai-error', { reason: 'timeout' })
         default: return new GameError('ai-error', { reason: 'unreachable' })
       }
     }

@@ -1,13 +1,13 @@
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { Context, Logger } from 'koishi'
-import type { Config } from './config'
+import type { Config, RenderTheme } from './config'
 import type { Accent } from './config'
 import type { LayoutPlan } from './types'
 import { clamp, escapeHtml, findLeak, sha1 } from './util'
 
 /** 模板版本号：改模板必须改它，否则旧缓存不会失效（FR-17 规则 9） */
-export const TEMPLATE_VERSION = 1
+export const TEMPLATE_VERSION = 2
 
 const ACCENTS: Record<Accent, { hex: string; tint: string; shadow: string }> = {
   rust: { hex: '#8c2318', tint: 'rgba(140,35,24,.16)', shadow: 'rgba(140,35,24,.55)' },
@@ -32,6 +32,10 @@ export interface SheetContext {
   passThreshold: number
   personalGuessQuota: number
   footerHint: boolean
+  /** newspaper = 做旧报纸；plain = 干净排版（去噪点/去印章/单色） */
+  theme?: RenderTheme
+  /** 逻辑宽度，默认取插件配置 */
+  width?: number
 }
 
 function mastheadSize(name: string): { px: number; ls: number } {
@@ -75,10 +79,16 @@ function autoStyle(bodyLength: number, plan: LayoutPlan) {
 /** 把 plan 渲染成完整 HTML。所有用户文本都必须经过 escapeHtml。 */
 export function buildNewspaperHTML(ctx: SheetContext): string {
   const { plan } = ctx
+  const theme: RenderTheme = ctx.theme === 'plain' ? 'plain' : 'newspaper'
+  const width = Math.round(clamp(ctx.width, 480, 1280, 720))
+  const paperWidth = width - 20
   const body = (plan.body?.length ? plan.body : ['（汤面缺失）']).map((p) => String(p).trim()).filter(Boolean)
   const bodyLength = body.reduce((sum, p) => sum + p.length, 0)
   const style = autoStyle(bodyLength, plan)
-  const accent = ACCENTS[style.accent]
+  // 干净主题不用彩色点缀，也不做旧；窄版强制单栏，否则两栏会挤成一条线
+  const accent = ACCENTS[theme === 'plain' ? 'ink' : style.accent]
+  const columns = width < 560 ? 1 : style.columns
+  const grain = theme === 'plain' ? 0 : style.grain
 
   const date = ctx.date
   const dateLine = `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`
@@ -112,12 +122,16 @@ export function buildNewspaperHTML(ctx: SheetContext): string {
 :root{--ink:#241a10;--ink2:#4a3a26;--accent:${accent.hex};--accent-shadow:${accent.shadow};--accent-tint:${accent.tint};
 --serif:"SimSun","宋体","Songti SC",serif;--hei:"SimHei","黑体","Microsoft YaHei",sans-serif;--kai:"KaiTi","楷体",serif;--li:"LiSu","隶书","STLiti",serif}
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{background:#cfbc95}
-body{width:720px;font-family:var(--serif);-webkit-font-smoothing:antialiased}
-.paper{position:relative;width:700px;margin:14px 10px;padding:30px 38px 22px;color:var(--ink);
+html,body{background:${theme === 'plain' ? '#f4f0e6' : '#cfbc95'}}
+body{width:${width}px;font-family:var(--serif);-webkit-font-smoothing:antialiased}
+.paper{position:relative;width:${paperWidth}px;margin:14px 10px;padding:30px 38px 22px;color:var(--ink);
 background:radial-gradient(140% 90% at 18% -10%,#f7f0da 0%,#efe4c6 42%,#e6d7b4 74%,#ddcaa3 100%);
 box-shadow:0 2px 20px rgba(57,38,12,.34),0 0 0 1px rgba(96,68,28,.2),inset 0 0 70px rgba(120,84,30,.2),inset 0 0 14px rgba(90,60,20,.18);overflow:hidden}
-.paper:before{content:"";position:absolute;inset:0;background:${GRAIN};background-size:240px 240px;mix-blend-mode:multiply;opacity:${style.grain};pointer-events:none;z-index:5}
+.paper.plain{background:#fbf7ec;box-shadow:0 2px 16px rgba(57,38,12,.18),0 0 0 1px rgba(96,68,28,.14)}
+.paper.plain:before{opacity:0}
+.paper.plain:after{background:none}
+.paper.plain .seal{display:none}
+.paper:before{content:"";position:absolute;inset:0;background:${GRAIN};background-size:240px 240px;mix-blend-mode:multiply;opacity:${grain};pointer-events:none;z-index:5}
 .paper:after{content:"";position:absolute;inset:0;mix-blend-mode:multiply;pointer-events:none;z-index:5;background:
 radial-gradient(38% 30% at 88% 6%,rgba(118,82,34,.4),transparent 70%),
 radial-gradient(30% 26% at 4% 62%,rgba(120,84,36,.34),transparent 72%),
@@ -137,7 +151,7 @@ text-shadow:1.2px 0 0 var(--accent-tint),-1.2px 0 0 rgba(46,66,96,.12),0 0 .6px 
 .deck{font-family:var(--kai);font-size:13px;color:var(--ink2);letter-spacing:.6px;margin-top:9px}
 .rule-dot{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:12px;color:rgba(36,26,16,.45)}
 .rule-dot i{flex:1;height:1px;background:currentColor}.rule-dot b{font-size:8px;font-weight:400;letter-spacing:2px}
-.body-text{margin-top:14px;column-count:${style.columns};column-gap:30px;column-rule:1px solid rgba(36,26,16,.28);
+.body-text{margin-top:14px;column-count:${columns};column-gap:30px;column-rule:1px solid rgba(36,26,16,.28);
 font-size:${style.fontPx}px;line-height:${style.lineHeight};text-align:justify;text-justify:inter-ideograph;color:#2a1e12}
 .body-text p{text-indent:2em;margin-bottom:.55em}
 .body-text p:first-child{text-indent:0}
@@ -154,7 +168,7 @@ opacity:${stampOpacity};transform:rotate(${stampAngle}deg);mix-blend-mode:multip
 .box p{font-size:11.5px;line-height:1.85;color:#33261a}
 .foot{display:flex;justify-content:space-between;margin-top:12px;padding-top:6px;border-top:1px solid rgba(36,26,16,.5);
 font-family:var(--kai);font-size:9.5px;color:var(--ink2)}
-</style></head><body><div class="paper"><div class="content">
+</style></head><body><div class="paper${theme === 'plain' ? ' plain' : ''}"><div class="content">
 <div class="rule-thick"></div>
 <div class="masthead">
 <div class="side">第 ${String(ctx.issue).padStart(4, '0')} 期<br>共 1 版</div>
@@ -235,15 +249,24 @@ export class Renderer {
   }
 
   private cacheKey(sheet: SheetContext): string {
+    // 版面上看得见的东西都必须进 key，否则改完配额/主题会命中旧图
     return sha1([
       sheet.plan.title,
+      sheet.plan.kicker || '',
+      sheet.plan.deck || '',
+      sheet.plan.stamp?.text || '',
       sheet.plan.body?.join('|') || '',
       sheet.paperName,
       sheet.difficulty,
+      (sheet.tags || []).join('/'),
+      String(sheet.issue),
+      `${sheet.date.getFullYear()}-${sheet.date.getMonth() + 1}-${sheet.date.getDate()}`,
       sheet.questionQuota,
       sheet.guessQuota,
+      sheet.personalGuessQuota,
       sheet.passThreshold,
-      this.config.renderTheme,
+      sheet.footerHint ? '1' : '0',
+      sheet.theme || this.config.renderTheme,
       this.config.renderWidth,
       this.config.renderScale,
       this.config.renderFormat,
@@ -314,7 +337,7 @@ export class Renderer {
     const html = buildNewspaperHTML(sheet)
     const started = Date.now()
     try {
-      const raw = await this.renderWithBackend(html)
+      const raw = await this.renderWithBackend(html, sheet.width ?? this.config.renderWidth)
       const image = extractImage(raw)
       if (!image) throw new Error('渲染结果无法解析')
       if (image.buffer.length < 1024) throw new Error('渲染结果为空')
@@ -345,7 +368,7 @@ export class Renderer {
    * `<img src="data:image/png;base64,..."/>` 字符串；想控制 viewport 与 jpg/webp 编码，
    * 必须在 callback 里自己截图并返回我们的 data URL。
    */
-  private async renderWithBackend(html: string): Promise<string> {
+  private async renderWithBackend(html: string, width: number): Promise<string> {
     const service = this.service
     const format = this.config.renderFormat
     const type = format === 'jpg' ? 'jpeg' : format
@@ -354,7 +377,7 @@ export class Renderer {
     try {
       return await service.render(html, async (page: any) => {
         await page.setViewport({
-          width: this.config.renderWidth,
+          width,
           height: 240,
           deviceScaleFactor: this.config.renderScale,
         })

@@ -1,6 +1,6 @@
 /**
  * 真实出图验证：用本机 Chrome + koishi-plugin-puppeteer 跑一遍开局，
- * 把插件实际发出的图片落到 docs/verify/real-render.jpg 供人工核对。
+ * 把插件实际发出的图片落到 docs/verify/ 供人工核对。
  *
  * 用法：
  *   node scripts/verify-render.js
@@ -47,9 +47,7 @@ function extractImage(replies) {
   return null
 }
 
-async function main() {
-  fs.mkdirSync(OUT_DIR, { recursive: true })
-
+function createApp(overrides = {}) {
   const app = new Context()
   app.plugin(mock)
   app.plugin(memory)
@@ -62,7 +60,8 @@ async function main() {
   })
   app.plugin(plugin, {
     talesDir: 'data/soup/tales',
-    apiKey: '',
+    // 开局要求配好 AI；版面走 default，所以这条假 key 不会真的发请求
+    apiKey: 'sk-verify',
     modelCheck: false,
     autoImport: true,
     renderMode: 'image-first',
@@ -72,22 +71,33 @@ async function main() {
     renderCacheMaxMB: 0,
     layoutPlanMode: 'default',
     masterAuthTTL: 600,
+    ...overrides,
   })
+  return app
+}
 
-  const started = Date.now()
-  await app.start()
-
-  // puppeteer 服务在 app ready 之后才真正 ready，我们的 ctx.inject 子插件随之挂载。
-  // 这里等它就绪再发消息，否则会走纯文本降级（真机上人不会这么快打字）。
+async function waitPuppeteer(app) {
   const deadline = Date.now() + 15000
   while (!app.puppeteer && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   await new Promise((resolve) => setTimeout(resolve, 300))
-  console.log(`[verify] app started in ${Date.now() - started}ms, puppeteer=${!!app.puppeteer}`)
+  return !!app.puppeteer
+}
 
-  const client = app.mock.client('verify', 'verify-room')
+/** 跑一局，把汤面图存下来；返回 { file, second } */
+async function renderOnce(options) {
+  const { theme, room, outFile, secondShot } = options
+  const app = createApp(theme ? { renderTheme: theme } : {})
+  const started = Date.now()
+  await app.start()
 
+  // puppeteer 服务在 app ready 之后才真正 ready，我们的 ctx.inject 子插件随之挂载。
+  // 这里等它就绪再发消息，否则会走纯文本降级（真机上人不会这么快打字）。
+  const ready = await waitPuppeteer(app)
+  console.log(`[verify] ${theme || 'newspaper'}：app started in ${Date.now() - started}ms, puppeteer=${ready}`)
+
+  const client = app.mock.client('verify', room)
   const replies = await client.receive('海龟汤 开局')
   console.log(`[verify] 开局收到 ${replies.length} 条消息`)
   for (const reply of replies) {
@@ -97,30 +107,40 @@ async function main() {
 
   const image = extractImage(replies)
   if (!image) {
-    console.error('[verify] 失败：没有收到图片，渲染走了降级路径')
     await app.stop()
-    process.exit(1)
+    throw new Error('没有收到图片，渲染走了降级路径')
   }
 
-  const file = path.join(OUT_DIR, 'real-render.jpg')
+  const file = path.join(OUT_DIR, outFile)
   fs.writeFileSync(file, image.buffer)
   console.log(`[verify] 图片已保存：${file}（${image.mime}，${(image.buffer.length / 1024).toFixed(0)} KB）`)
 
-  const rows = await app.database.get('situation_puzzle_session', { channelKey: 'mock:verify-room' })
+  const rows = await app.database.get('situation_puzzle_session', { channelKey: `mock:${room}` })
   console.log(`[verify] 场次 renderMode = ${rows[0]?.renderMode}`)
 
-  // 再发一次汤面，验证缓存/二次渲染路径不报错
-  const again = await client.receive('海龟汤 汤面')
-  const second = extractImage(again)
-  console.log(`[verify] 汤面二次出图：${second ? `${(second.buffer.length / 1024).toFixed(0)} KB` : '失败'}`)
+  let second = null
+  if (secondShot) {
+    // 再发一次汤面，验证缓存/二次渲染路径不报错
+    const again = await client.receive('海龟汤 汤面')
+    second = extractImage(again)
+    console.log(`[verify] 汤面二次出图：${second ? `${(second.buffer.length / 1024).toFixed(0)} KB` : '失败'}`)
+  }
 
   await app.stop()
-  if (!second) process.exit(1)
-  if (rows[0]?.renderMode !== 'image') process.exit(1)
+  if (rows[0]?.renderMode !== 'image') throw new Error('场次没有记录成 image 模式')
+  return { file, second }
+}
+
+async function main() {
+  fs.mkdirSync(OUT_DIR, { recursive: true })
+
+  await renderOnce({ room: 'verify-room', outFile: 'real-render.jpg', secondShot: true })
+  await renderOnce({ theme: 'plain', room: 'verify-plain', outFile: 'plain-render.jpg' })
+
   console.log('[verify] 通过')
 }
 
 main().catch(async (error) => {
-  console.error('[verify] 异常：', error)
+  console.error('[verify] 失败：', error.message)
   process.exit(1)
 })

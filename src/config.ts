@@ -45,6 +45,7 @@ export interface Config {
   dailyCallLimit: number
   modelCheck: boolean
   includeHistory: boolean
+  abortOnAiFailure: boolean
 
   // ---- 汤库
   talesDir: string
@@ -120,7 +121,7 @@ export const Config: Schema<Config> = Schema.intersect([
     shortCommands: Schema.boolean().default(true)
       .description('注册短别名：汤 = 海龟汤，问 / 提交 / 开局 可直接使用（被占用时自动跳过）'),
     quoteAsk: Schema.boolean().default(true)
-      .description('引用 bot 的消息时，直接把内容当作提问（不用再打「海龟汤 问」）'),
+      .description('引用 bot 自己发的消息时，直接把文字当作提问（引用别人的消息不会有反应）'),
     hostCanEnd: Schema.boolean().default(true)
       .description('发起人可以结束自己开的场次'),
   }).description('玩法规则'),
@@ -147,7 +148,9 @@ export const Config: Schema<Config> = Schema.intersect([
     modelCheck: Schema.boolean().default(true)
       .description('启动时校验模型名是否存在'),
     includeHistory: Schema.boolean().default(false)
-      .description('把本场历史问答作为上下文（显著增加成本）'),
+      .description('把本场已确认的判词作为上下文（显著增加成本）'),
+    abortOnAiFailure: Schema.boolean().default(true)
+      .description('AI 判定失败时直接结束本场并公布汤底；关闭则只提示「稍后重试」'),
   }).description('AI 服务'),
 
   Schema.object({
@@ -171,7 +174,7 @@ export const Config: Schema<Config> = Schema.intersect([
     renderBackend: Schema.union(['auto', 'puppeteer', 'text'] as const).default('auto')
       .description('出图后端，auto 自动探测'),
     renderTheme: Schema.union(['newspaper', 'plain'] as const).default('newspaper')
-      .description('图片主题'),
+      .description('图片主题：做旧报纸 / 干净排版（可按频道覆盖）'),
     renderWidth: Schema.natural().min(480).max(1280).default(720)
       .description('图片逻辑宽度（px）'),
     renderScale: Schema.natural().min(1).max(3).default(2)

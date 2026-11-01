@@ -1,6 +1,6 @@
 import { Context, h, Session } from 'koishi'
 import { AIClient } from './ai'
-import type { Config } from './config'
+import type { Config, RenderTheme } from './config'
 import { TABLES, setupModel } from './db'
 import { Game, GameError, channelKeyOf, defaultPlan, userKeyOf } from './game'
 import enUS from './locales/en-US'
@@ -24,10 +24,13 @@ export const inject = {
 
 export const usage = `把 bot 变成 AI 海龟汤主持人。
 
-1. 放汤：把 JSON 汤文件放进 \`data/situation-puzzle/tales/\`，或用「海龟汤 汤库 重载」重扫。
-2. 配 Key：在插件配置里填 apiKey（或设环境变量 DEEPSEEK_API_KEY）。
+1. 放汤：把 JSON 汤文件放进 \`data/soup/tales/\`，或用「海龟汤 汤库 重载」重扫。
+2. 配 Key：在插件配置里填 apiKey（或设环境变量 DEEPSEEK_API_KEY）。没有 Key 开不了局。
 3. 绑主人：发送「海龟汤 主人 绑定」，到控制台日志里取 6 位密钥再发一次。
 4. 开局：「海龟汤 开局」，之后「海龟汤 问 …」「海龟汤 提交 …」。
+
+引用 bot 自己发的消息说话，就等于在提问（引用别人的消息不会有反应）。
+AI 中途断线会直接散场并公布汤底，不会让场次挂着。
 
 出图需要额外安装 koishi-plugin-puppeteer；没装也能玩，只发纯文本。`
 
@@ -39,6 +42,7 @@ interface ChannelRules {
   maxDuration: number
   joinWindow: number
   renderMode: 'image-first' | 'text'
+  renderTheme: RenderTheme
 }
 
 export function apply(ctx: Context, config: Config) {
@@ -74,6 +78,7 @@ export function apply(ctx: Context, config: Config) {
     const rows = await ctx.database.get(TABLES.override, { channelKey })
     const map = new Map(rows.map((row) => [row.field, row.value]))
     const mode = map.get('renderMode')
+    const theme = map.get('renderTheme')
     return {
       questionQuota: num(map.get('questionQuota'), config.defaultQuestionQuota),
       guessQuota: num(map.get('guessQuota'), config.defaultGuessQuota),
@@ -82,6 +87,7 @@ export function apply(ctx: Context, config: Config) {
       maxDuration: num(map.get('maxDuration'), config.maxDuration),
       joinWindow: num(map.get('joinWindow'), config.joinWindow),
       renderMode: mode === 'text' || mode === 'image-first' ? mode : config.renderMode,
+      renderTheme: theme === 'plain' || theme === 'newspaper' ? theme : config.renderTheme,
     }
   }
 
@@ -101,6 +107,21 @@ export function apply(ctx: Context, config: Config) {
     if (master.userId !== userKeyOf(session)) throw new GameError('no-permission')
   }
 
+  // AI 故障时不再让玩家「稍后再试」——判题器没了，这锅汤根本进行不下去，直接散场并交底
+  const AI_REASONS: Record<string, string> = {
+    'not-configured': '没填 apiKey',
+    'daily-limit': '今日调用额度已用完',
+    'auth': 'apiKey 鉴权失败',
+    'model': '模型名不对',
+    'timeout': '请求超时',
+    'unreachable': '连不上 API 站点',
+    'leak': '回复里带出了汤底',
+  }
+
+  function abortText(session: Session, reason: string, answer: string): string {
+    return t(session, 'aiAborted', [AI_REASONS[reason] || '未知错误', answer || '（这锅没有汤底）'])
+  }
+
   function mapError(session: Session, error: GameError): string {
     const data = error.data || {}
     switch (error.code) {
@@ -108,6 +129,7 @@ export function apply(ctx: Context, config: Config) {
       case 'no-session': return t(session, 'noSession')
       case 'not-running': return t(session, 'joinClosed')
       case 'not-joining': return t(session, 'ended')
+      case 'no-room': return t(session, 'joinNotNeeded')
       case 'not-joined': return t(session, 'notJoined')
       case 'full': return t(session, 'joinFull', [config.maxPlayers])
       case 'already-joined': return t(session, 'joinDuplicate')
@@ -119,19 +141,22 @@ export function apply(ctx: Context, config: Config) {
       case 'incomplete': return t(session, 'taleIncomplete')
       case 'no-permission': return t(session, 'noPermission')
       case 'no-master': return t(session, 'noMaster')
-      case 'ai-unavailable':
+      case 'ai-unavailable': {
+        if (data.aborted) return abortText(session, String(data.reason || ''), String(data.answer ?? ''))
         return String(data.reason) === 'daily-limit'
           ? t(session, 'aiDailyLimit')
           : t(session, 'aiNotConfigured')
+      }
       case 'ai-error': {
         const reason = String(data.reason || '')
+        if (data.aborted) return abortText(session, reason, String(data.answer ?? ''))
         if (reason === 'auth') return t(session, 'aiAuthFailed')
         if (reason === 'model') return t(session, 'aiModelInvalid')
         if (reason === 'empty-question') return t(session, 'aiEmptyQuestion')
         return t(session, 'aiUnreachable')
       }
       default:
-        return t(session, 'aiUnreachable')
+        return t(session, 'unknownError')
     }
   }
 
@@ -193,6 +218,8 @@ export function apply(ctx: Context, config: Config) {
         passThreshold: sessionRow.passThreshold,
         personalGuessQuota: sessionRow.personalGuessQuota,
         footerHint: config.renderFooterHint,
+        theme: rules.renderTheme,
+        width: config.renderWidth,
       }
       const output = await renderer.render(sheet)
       if (output.ok && output.image) {
@@ -222,12 +249,13 @@ export function apply(ctx: Context, config: Config) {
       ? t(session, 'quotaLimited', [row.questionQuota])
       : t(session, 'quotaUnlimited')
     const personal = row.personalGuessQuota > 0 ? ` · 个人 ${row.personalGuessQuota} 次` : ''
-    return t(session, 'openedRules', [
+    const text = t(session, 'openedRules', [
       quota,
       row.guessQuota,
       personal,
       Math.round(row.passThreshold * 100),
     ])
+    return config.answeringHint ? text : text.replace(/\n主持人只回答[^\n]*/, '')
   }
 
   function verdictText(session: Session, verdict: string): string {
@@ -240,6 +268,25 @@ export function apply(ctx: Context, config: Config) {
   }
 
   // ---------------------------------------------------------------- 生命周期
+  /** 场次明细按 historyRetentionDays 保留，过期连表一起清，避免库无限长 */
+  const pruneHistory = async () => {
+    try {
+      const cutoff = new Date(Date.now() - config.historyRetentionDays * 86400000)
+      const rows = await ctx.database.get(TABLES.session, { status: 'settled', settledAt: { $lt: cutoff } })
+      if (!rows.length) return
+      const ids = rows.map((row) => row.id)
+      await ctx.database.remove(TABLES.question, { sessionId: { $in: ids } })
+      await ctx.database.remove(TABLES.guess, { sessionId: { $in: ids } })
+      await ctx.database.remove(TABLES.player, { sessionId: { $in: ids } })
+      await ctx.database.remove(TABLES.session, { id: { $in: ids } })
+      logger.info('已清理 %d 场过期记录（保留 %d 天）', ids.length, config.historyRetentionDays)
+    } catch (error) {
+      logger.warn('清理过期场次失败：%s', (error as Error).message)
+    }
+  }
+
+  ctx.setInterval(() => { void pruneHistory() }, 6 * 3600 * 1000)
+
   ctx.on('ready', async () => {
     if (config.autoImport) {
       // 先铺内置样例汤（只在汤库为空时铺），再扫库——否则新装用户一开局就是「汤库为空」
@@ -248,6 +295,7 @@ export function apply(ctx: Context, config: Config) {
       if (report.errors.length) logger.warn('汤库有 %d 条失败记录', report.failed)
     }
     await renderer?.pruneCache()
+    void pruneHistory()
 
     if (config.modelCheck && ai.available) {
       fetch(`${config.baseURL.replace(/\/+$/, '')}/models`, {
@@ -267,6 +315,8 @@ export function apply(ctx: Context, config: Config) {
   // 不能靠 L1 的 text 参数来兜，那会把「海龟汤 汤库」这类合法子指令一并吞掉，
   // 所以放在中间件里，只拦 v0 文档里那几个两段式写法。
   ctx.middleware((session, next) => {
+    // 顺带记下频道里最近一个会话：超时/流局的定时器要靠它回话
+    game.remember(session)
     const content = session.content?.trim()
     if (!content?.startsWith('海龟汤 ')) return next()
     const legacy = content.slice(4).trim()
@@ -309,6 +359,8 @@ export function apply(ctx: Context, config: Config) {
     .action(async ({ session, options }, keyword) => {
       if (!session) return
       return run(session, async () => {
+        // 没有 AI 就判不了题，开局即散场是最差的体验，直接拦在门口
+        if (!ai.available) throw new GameError('ai-unavailable', { reason: 'not-configured' })
         const key = channelKeyOf(session)
         const rules = await channelRules(key)
         const tale = await pickTale(session, keyword)
@@ -384,21 +436,24 @@ export function apply(ctx: Context, config: Config) {
   guessCommand.action(async ({ session }, content) => {
     if (!session) return
     return run(session, async () => {
+      const guess = (content || '').trim()
+      if (!guess) return t(session, 'aiEmptyGuess')
       const row = await game.requireRunning(channelKeyOf(session))
-      const outcome = await game.guess(row, userKeyOf(session), content || '')
+      const outcome = await game.guess(row, userKeyOf(session), guess)
       const threshold = Math.round(row.passThreshold * 100)
 
       if (outcome.passed) {
+        const people = await game.participants(row.id)
         const lines = [
           t(session, 'guessPassed', [outcome.score, threshold]),
-          t(session, 'settleWin', [session.username || '玩家', outcome.score]),
+          t(session, 'settleWin', [session.username || '玩家']),
           t(session, 'answerTitle'),
           row.taleSnapshot.answer,
           t(session, 'sessionStats', [
-            row.questionsUsed + 1,
+            row.questionsUsed,
             row.guessesUsed + 1,
             formatDuration(Date.now() - new Date(row.startedAt).getTime()),
-            '1',
+            people,
           ]),
         ]
         await sendText(session, lines.join('\n'))
@@ -422,6 +477,11 @@ export function apply(ctx: Context, config: Config) {
           .map((item) => `${item.id}${item.hit === 'yes' ? '✅' : item.hit === 'partial' ? '⚠️' : '❌'}`)
           .join(' ')
         text += '\n' + t(session, 'scoreDetail', [marks])
+      }
+
+      // 最后一次机会也没中：当场交底，别把场次挂在那儿没人管
+      if (outcome.exhausted) {
+        text += '\n' + t(session, 'settleEmpty') + '\n' + t(session, 'answerTitle') + '\n' + row.taleSnapshot.answer
       }
       return text
     })
@@ -509,10 +569,11 @@ export function apply(ctx: Context, config: Config) {
     if (!session) return
     const rows = await listTales(ctx, {})
     if (!rows.length) return t(session, 'libraryEmpty', [resolveTalesDir(ctx, config)])
-    return t(session, 'libraryHeader', [rows.length, 1, 1]) + '\n'
+    return t(session, 'libraryHeader', [rows.length]) + '\n'
       + rows.slice(0, 20).map((tale, index) =>
         t(session, 'libraryItem', [index + 1, tale.title, difficultyLabel(tale.difficulty), tale.playedCount]),
       ).join('\n')
+      + (rows.length > 20 ? '\n' + t(session, 'libraryTruncated', [rows.length - 20]) : '')
   })
 
   ctx.command('海龟汤.汤库.列表', { authority: 1 })
@@ -522,11 +583,12 @@ export function apply(ctx: Context, config: Config) {
       if (!session) return
       const rows = await listTales(ctx, { keyword: options?.keyword as string, all: !!options?.all })
       if (!rows.length) return t(session, 'libraryEmpty', [resolveTalesDir(ctx, config)])
-      return t(session, 'libraryHeader', [rows.length, 1, 1]) + '\n'
+      return t(session, 'libraryHeader', [rows.length]) + '\n'
         + rows.slice(0, 20).map((tale, index) =>
           t(session, 'libraryItem', [index + 1, tale.title, difficultyLabel(tale.difficulty), tale.playedCount])
           + (tale.enabled ? '' : t(session, 'libraryItemDisabled')),
         ).join('\n')
+        + (rows.length > 20 ? '\n' + t(session, 'libraryTruncated', [rows.length - 20]) : '')
     })
 
   ctx.command('海龟汤.汤库.查看 <target:string>', { authority: 1 }).action(async ({ session }, target) => {
@@ -677,7 +739,7 @@ export function apply(ctx: Context, config: Config) {
     const rules = await channelRules(channelKeyOf(session))
     return t(session, 'renderStatus', [
       renderer?.available ? t(session, 'renderBackendPuppeteer') : t(session, 'renderBackendText'),
-      config.renderTheme,
+      rules.renderTheme,
       config.renderCacheMaxMB,
       rules.renderMode,
     ])
@@ -688,7 +750,7 @@ export function apply(ctx: Context, config: Config) {
     const rules = await channelRules(channelKeyOf(session))
     return t(session, 'renderStatus', [
       renderer?.available ? t(session, 'renderBackendPuppeteer') : t(session, 'renderBackendText'),
-      config.renderTheme,
+      rules.renderTheme,
       config.renderCacheMaxMB,
       rules.renderMode,
     ])
@@ -705,6 +767,7 @@ export function apply(ctx: Context, config: Config) {
       if (!tale) return t(session, 'libraryEmpty', [resolveTalesDir(ctx, config)])
       const plan = await game.ensurePlan(tale)
       const started = Date.now()
+      const rules = await channelRules(channelKeyOf(session))
       const output = await renderer.render({
         plan,
         paperName: plan.masthead?.name || config.paperName,
@@ -717,6 +780,8 @@ export function apply(ctx: Context, config: Config) {
         passThreshold: config.passThreshold,
         personalGuessQuota: config.personalGuessQuota,
         footerHint: config.renderFooterHint,
+        theme: rules.renderTheme,
+        width: config.renderWidth,
       })
       if (!output.ok || !output.image) return t(session, 'renderTestFailed')
       await session.send(h.image(`data:${output.mime};base64,${output.image.toString('base64')}`))
@@ -739,7 +804,8 @@ export function apply(ctx: Context, config: Config) {
     if (!session) return
     return run(session, async () => {
       await requireMaster(session)
-      if (!theme) return t(session, 'renderThemeSet', [config.renderTheme])
+      const rules = await channelRules(channelKeyOf(session))
+      if (!theme) return t(session, 'renderThemeSet', [rules.renderTheme])
       if (!['newspaper', 'plain'].includes(theme)) {
         return t(session, 'renderThemeInvalid', ['newspaper / plain'])
       }
@@ -806,18 +872,50 @@ export function apply(ctx: Context, config: Config) {
 
   // ---------------------------------------------------------------- 引用即提问
   // 必须注册在指令之后：指令先被 commander 处理，这里只会收到没匹配到指令的普通消息。
+  //
+  // 关键前提：只认「引用 bot 自己发的消息」。群里随时有人在回复别人的话，
+  // 早期只看「有没有 quote」就抢答，结果谁回复谁都能触发一次提问（AI 一挂就满屏报错）。
+  const quoteOwner = new Map<string, boolean>()
+
+  async function quotedBySelf(session: Session, quote: { id?: string; user?: { id?: string } }): Promise<boolean> {
+    // 多数平台会带上被引用消息的作者，有就直接比，一次网络请求都不用发
+    const author = quote.user?.id
+    if (author) return String(author) === String(session.selfId)
+
+    const id = String(quote.id)
+    const cached = quoteOwner.get(id)
+    if (cached !== undefined) return cached
+
+    let mine = false
+    try {
+      const message = await session.bot?.getMessage?.(session.channelId!, id)
+      mine = String(message?.user?.id ?? '') === String(session.selfId)
+    } catch {
+      mine = false
+    }
+    if (quoteOwner.size > 256) quoteOwner.clear()
+    quoteOwner.set(id, mine)
+    return mine
+  }
+
   ctx.middleware(async (session, next) => {
     if (!config.quoteAsk) return next()
 
-    const quoted = (session.event as any)?.message?.quote
-    if (!quoted) return next()
-
-    const content = session.content?.trim()
-    if (!content) return next()
+    // 先看有没有引用再做数据库查询：普通消息不能因此多一次 query
+    const quote = (session.event as any)?.message?.quote
+    if (!quote?.id) return next()
 
     const row = await game.active(channelKeyOf(session))
     if (!row || row.status !== 'running') return next()
 
-    return askOnce(session, content)
+    if (!(await quotedBySelf(session, quote))) return next()
+
+    // 只取纯文本：引用一张图 / 一个表情也当问题发出去就太吵了
+    const elements = ((session as any).elements ?? []).filter((el: any) => el?.type !== 'quote')
+    const text = h.select(elements, 'text').join('').trim()
+    if (!text) return next()
+    if (/^海龟汤\s/.test(text)) return next()
+
+    return askOnce(session, text)
   })
 }

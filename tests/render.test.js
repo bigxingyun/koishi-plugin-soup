@@ -76,6 +76,20 @@ test('decodeImage：dataURL 与裸 base64 都能解码', () => {
   assert.equal(decodeImage(''), null)
 })
 
+test('buildNewspaperHTML：plain 主题去噪点、去印章', () => {
+  const html = buildNewspaperHTML({ ...baseSheet({ title: '干净版', body: ['正文'] }), theme: 'plain' })
+  assert.ok(html.includes('class="paper plain"'), '必须挂上 plain 类')
+  assert.ok(html.includes('.paper.plain:before{opacity:0}'), 'plain 不画纸纹')
+  assert.ok(html.includes('.paper.plain .seal{display:none}'), 'plain 不盖印章')
+})
+
+test('buildNewspaperHTML：renderWidth 真的作用到版面上', () => {
+  const html = buildNewspaperHTML({ ...baseSheet({ title: '窄版', body: ['正文'] }), width: 520 })
+  assert.ok(html.includes('body{width:520px'), 'body 宽度应跟随配置')
+  assert.ok(html.includes('.paper{position:relative;width:500px'), '纸张宽度应跟随配置')
+  assert.ok(/column-count:1/.test(html), '窄版必须退成单栏，否则两栏挤成一条线')
+})
+
 test('TEMPLATE_VERSION：模板改动必须递增版本号以让缓存失效', () => {
   assert.equal(typeof TEMPLATE_VERSION, 'number')
   assert.ok(TEMPLATE_VERSION >= 1)

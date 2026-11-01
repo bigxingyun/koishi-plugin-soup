@@ -13,6 +13,21 @@ const memory = memoryPlugin.default ?? memoryPlugin
 
 const TMP = 'tests/.seed-tmp'
 
+/** 开局现在要求配好 AI，这里给个假站点，只验证样例汤能开局 */
+function stubFetch() {
+  globalThis.fetch = async (url, init) => {
+    const payload = String(url).endsWith('/models')
+      ? { data: [{ id: 'deepseek-flash' }] }
+      : { verdict: 'yes' }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => payload,
+      text: async () => JSON.stringify(payload),
+    }
+  }
+}
+
 async function createApp(overrides = {}) {
   const app = new Context()
   app.plugin(mock)
@@ -35,7 +50,8 @@ async function reset() {
 
 test('内置样例汤：汤库为空时自动铺入并导入', async (t) => {
   await reset()
-  const app = await createApp({ seedBundled: true })
+  stubFetch()
+  const app = await createApp({ seedBundled: true, apiKey: 'sk-seed' })
   t.after(async () => {
     await app.stop()
     await reset()

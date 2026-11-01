@@ -16,7 +16,11 @@ const messages = {
   cooldown: 'Please wait {0}s.',
   noPermission: 'You do not have permission to do that.',
   aiNotConfigured: 'AI is not configured yet. Please ask the admin for an apiKey.',
-  aiUnreachable: 'The host is away. Please try again (this attempt was not counted).',
+  aiUnreachable: 'The host is not responding. Please ask again later (this attempt was not counted).',
+  aiAborted: 'The AI host is unreachable ({0}), so this round is over.\n—— Answer ——\n{1}',
+  aiEmptyGuess: 'Write down your theory, e.g. "海龟汤 提交 she never died".',
+  unknownError: 'Something went wrong. This action did not complete.',
+  settleWin: '🎉 {0} solved it!',
   bindSuccess: 'Bound. You are now this bot\'s master.',
   bindFailed: 'Invalid or expired code.',
 }
