@@ -337,7 +337,10 @@ export class Renderer {
     const html = buildNewspaperHTML(sheet)
     const started = Date.now()
     try {
-      const raw = await this.renderWithBackend(html, sheet.width ?? this.config.renderWidth)
+      const raw = await this.withTimeout(
+        this.renderWithBackend(html, sheet.width ?? this.config.renderWidth),
+        this.config.renderTimeout * 1000,
+      )
       const image = extractImage(raw)
       if (!image) throw new Error('渲染结果无法解析')
       if (image.buffer.length < 1024) throw new Error('渲染结果为空')
@@ -359,6 +362,22 @@ export class Renderer {
       }
       return { ok: false }
     }
+  }
+
+  /**
+   * 给渲染套一层超时。
+   * puppeteer 卡死时（容器缺字体、Chrome 崩了但不返回）Promise 永远不会 settle，
+   * 没有这层兜底，开局指令会一直挂着不回复。
+   */
+  private withTimeout<T>(task: Promise<T>, ms: number): Promise<T> {
+    if (!(ms > 0)) return task
+    return new Promise<T>((resolve, reject) => {
+      const dispose = this.ctx.setTimeout(() => reject(new Error(`渲染超时（${ms}ms）`)), ms)
+      task.then(
+        (value) => { dispose(); resolve(value) },
+        (error) => { dispose(); reject(error) },
+      )
+    })
   }
 
   /**

@@ -25,6 +25,7 @@ export interface Config {
   maxPlayers: number
   passThreshold: number
   maxDuration: number
+  idleTimeout: number
   questionCooldown: number
   guessCooldown: number
   allowPartialAnswer: boolean
@@ -109,7 +110,9 @@ export const Config: Schema<Config> = Schema.intersect([
     passThreshold: Schema.percent().min(0.5).max(1).default(0.8)
       .description('通过相似度阈值'),
     maxDuration: Schema.natural().max(86400).default(0)
-      .description('单场时长上限（秒），0 表示不限'),
+      .description('单场时长上限（秒），从真正开打（集结结束）算起，0 表示不限'),
+    idleTimeout: Schema.natural().max(86400).default(600)
+      .description('无人动作多久自动收场（秒），兜住「开局后没人玩」，0 表示关闭'),
     questionCooldown: Schema.natural().max(60).default(3)
       .description('提问冷却（秒）'),
     guessCooldown: Schema.natural().max(60).default(5)

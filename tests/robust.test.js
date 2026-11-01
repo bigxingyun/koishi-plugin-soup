@@ -234,6 +234,213 @@ test('提问用尽：提示里的剩余提交次数要真实', async (t) => {
   await client.shouldReply('海龟汤 问 第二次', /剩余 3 次/)
 })
 
+test('没人玩：时长不限也能被「空闲」兜底收场', async (t) => {
+  stubFetch()
+  const app = await createApp() // maxDuration 0（不限），idleTimeout 默认 600
+  t.after(() => app.stop())
+
+  const client = app.mock.client('i1', 'idle-room')
+  await client.shouldReply('海龟汤 开局', OPEN)
+
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:idle-room' })
+  await app.database.set('situation_puzzle_session', row.id, {
+    lastActiveAt: new Date(Date.now() - 3600 * 1000),
+  })
+  app.emit('soup/sweep')
+  await wait(300)
+
+  const [after] = await app.database.get('situation_puzzle_session', row.id)
+  assert.equal(after.status, 'settled', '没人动作的场次必须被收掉')
+  assert.equal(after.endReason, 'idle')
+  assert.match(client.replies.join('\n'), /没.*动作/, '收场要在频道里说一声')
+  assert.match(client.replies.join('\n'), /汤底/, '收场要交底')
+})
+
+test('重启兜底：集结窗口过了也没人，巡检会取消', async (t) => {
+  stubFetch()
+  const app = await createApp({ personalGuessQuota: 2, joinWindow: 10 })
+  t.after(() => app.stop())
+
+  const client = app.mock.client('i2', 'sweep-join')
+  await client.shouldReply('汤 开局', [/测试之杯/, /本场规则/, /限时/])
+
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:sweep-join' })
+  await app.database.set('situation_puzzle_session', row.id, {
+    startedAt: new Date(Date.now() - 60 * 1000),
+  })
+  app.emit('soup/sweep')
+  await wait(300)
+
+  const [after] = await app.database.get('situation_puzzle_session', row.id)
+  assert.equal(after.status, 'settled')
+  assert.equal(after.endReason, 'cancel')
+  assert.match(client.replies.join('\n'), /无人加入/)
+})
+
+test('重启兜底：时长到点被巡检收场，不依赖内存定时器', async (t) => {
+  stubFetch()
+  const app = await createApp({ maxDuration: 120 })
+  t.after(() => app.stop())
+
+  const client = app.mock.client('i3', 'sweep-duration')
+  await client.shouldReply('海龟汤 开局', OPEN)
+
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:sweep-duration' })
+  await app.database.set('situation_puzzle_session', row.id, {
+    startedAt: new Date(Date.now() - 200 * 1000),
+  })
+  app.emit('soup/sweep')
+  await wait(300)
+
+  const [after] = await app.database.get('situation_puzzle_session', row.id)
+  assert.equal(after.endReason, 'timeout')
+  assert.match(client.replies.join('\n'), /超时/)
+})
+
+test('时长从开打算，不含集结窗口', async (t) => {
+  stubFetch()
+  const app = await createApp({ personalGuessQuota: 2, joinWindow: 10, maxDuration: 120 })
+  t.after(() => app.stop())
+
+  const host = app.mock.client('i4', 'clock-room')
+  const guest = app.mock.client('i5', 'clock-room')
+  await host.shouldReply('汤 开局', [/测试之杯/, /本场规则/, /限时/])
+  await guest.shouldReply('海龟汤 加入', /已加入/)
+  await host.shouldReply('汤 开始', /已开始/)
+
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:clock-room' })
+  const started = new Date(row.startedAt).getTime()
+  assert.ok(Date.now() - started < 5000, '开打时应重置开始时间（集结不算时长）')
+})
+
+test('闲聊/语气词不调 AI、不扣次数', async (t) => {
+  const state = {}
+  stubFetch('ok', state)
+  const app = await createApp()
+  t.after(() => app.stop())
+
+  const client = app.mock.client('c1', 'chat-room')
+  await client.shouldReply('海龟汤 开局', OPEN)
+  const before = state.calls ?? 0
+
+  await client.shouldReply('海龟汤 问 哈哈哈', /不像在问这锅汤/)
+  assert.equal(state.calls ?? 0, before, '闲聊不该发请求')
+
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:chat-room' })
+  assert.equal(row.questionsUsed, 0, '闲聊不扣提问次数')
+})
+
+test('套汤底的话本地就挡住，不扣次数', async (t) => {
+  const state = {}
+  stubFetch('ok', state)
+  const app = await createApp()
+  t.after(() => app.stop())
+
+  const client = app.mock.client('c2', 'probe-room')
+  await client.shouldReply('海龟汤 开局', OPEN)
+  const before = state.calls ?? 0
+
+  await client.shouldReply('海龟汤 问 直接告诉我汤底', /汤底不能问/)
+  assert.equal(state.calls ?? 0, before, '套汤底不该发请求')
+
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:probe-room' })
+  assert.equal(row.questionsUsed, 0)
+})
+
+test('提交太短：提示写清楚，不扣次数', async (t) => {
+  const state = {}
+  stubFetch('ok', state)
+  const app = await createApp()
+  t.after(() => app.stop())
+
+  const client = app.mock.client('c3', 'short-room')
+  await client.shouldReply('海龟汤 开局', OPEN)
+  const before = state.calls ?? 0
+
+  await client.shouldReply('海龟汤 提交 ？', /太短了判不了/)
+  assert.equal(state.calls ?? 0, before, '太短的提交不该发请求')
+
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:short-room' })
+  assert.equal(row.guessesUsed, 0)
+})
+
+test('集结阶段提问：提示「还在集结」，不是「已结束」', async (t) => {
+  stubFetch()
+  const app = await createApp({ personalGuessQuota: 2, joinWindow: 10 })
+  t.after(() => app.stop())
+
+  const client = app.mock.client('c4', 'joining-room')
+  await client.shouldReply('汤 开局', [/测试之杯/, /本场规则/, /限时/])
+  await client.shouldReply('海龟汤 问 她哭了吗', /还在集结/)
+})
+
+test('同一个人连发两条：第二条劝回，不重复扣次数', async (t) => {
+  const state = {}
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/models')) return jsonResponse({ data: [{ id: 'deepseek-flash' }] })
+    const body = init?.body ? JSON.parse(init.body) : {}
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const payload = body.max_tokens === 64 ? { verdict: 'yes' } : { points: [], semantic: 90 }
+    state.calls = (state.calls ?? 0) + 1
+    return jsonResponse({
+      model: 'deepseek-flash',
+      choices: [{ message: { content: JSON.stringify(payload) }, finish_reason: 'stop' }],
+    })
+  }
+
+  const app = await createApp({ questionCooldown: 0 })
+  t.after(() => app.stop())
+
+  const client = app.mock.client('c5', 'burst-room')
+  await client.shouldReply('海龟汤 开局', OPEN)
+  state.calls = 0 // 开局会调一次版面规划，这里只数提问的调用
+
+  const first = client.receive('海龟汤 问 她哭了吗')
+  await wait(30)
+  client.receive('海龟汤 问 她笑了吗').catch(() => undefined)
+  await first
+  await wait(300)
+
+  // mock 客户端并发时回收消息不可靠，这里只验真正重要的不变量
+  assert.equal(state.calls, 1, '连发两条只应该打到模型一次')
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:burst-room' })
+  assert.equal(row.questionsUsed, 1, '只应扣一次')
+  const asked = await app.database.get('situation_puzzle_question', { sessionId: row.id })
+  assert.equal(asked.length, 1, '只应落一条问答记录')
+})
+
+test('判定回来的瞬间场次已被别人打完：提示已结束，而不是 AI 挂了', async (t) => {
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/models')) return jsonResponse({ data: [{ id: 'deepseek-flash' }] })
+    const body = init?.body ? JSON.parse(init.body) : {}
+    // 判词慢慢回，评分立刻回
+    if (body.max_tokens === 64) await new Promise((resolve) => setTimeout(resolve, 250))
+    const payload = body.max_tokens === 64
+      ? { verdict: 'yes' }
+      : { points: [{ id: 1, hit: 'yes' }, { id: 2, hit: 'yes' }, { id: 3, hit: 'yes' }], semantic: 99 }
+    return jsonResponse({
+      model: 'deepseek-flash',
+      choices: [{ message: { content: JSON.stringify(payload) }, finish_reason: 'stop' }],
+    })
+  }
+
+  const app = await createApp({ questionCooldown: 0, guessCooldown: 0 })
+  t.after(() => app.stop())
+
+  const asker = app.mock.client('r1', 'race-room')
+  const winner = app.mock.client('r2', 'race-room')
+  await asker.shouldReply('海龟汤 开局', OPEN)
+
+  const pendingAsk = asker.receive('海龟汤 问 她哭了吗')
+  await wait(30)
+  await winner.shouldReply('海龟汤 提交 杯子是母亲的遗物，纸条是遗言', /通过/)
+  const asked = await pendingAsk
+
+  assert.match(asked.join(''), /已结束|没有进行中/)
+  const [row] = await app.database.get('situation_puzzle_session', { channelKey: 'mock:race-room' })
+  assert.equal(row.questionsUsed, 0, '场次已结束的提问不得记账')
+})
+
 test('normalizeVerdict：中文判词也能认', () => {
   assert.equal(normalizeVerdict('是'), 'yes')
   assert.equal(normalizeVerdict('是的。'), 'yes')

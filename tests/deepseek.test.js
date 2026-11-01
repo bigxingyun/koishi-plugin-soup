@@ -145,7 +145,7 @@ test('DeepSeek 容错：401 给出鉴权提示且不扣配额', async (t) => {
 
   const client = app.mock.client('a1', 'auth-room')
   await client.shouldReply('海龟汤 开局', [/测试之杯/, /本场规则/])
-  await client.shouldReply('海龟汤 问 有人吗', /鉴权失败/)
+  await client.shouldReply('海龟汤 问 她哭了吗', /鉴权失败/)
 
   const rows = await app.database.get('situation_puzzle_session', { channelKey: 'mock:auth-room' })
   assert.equal(rows[0].questionsUsed, 0, '鉴权失败不得扣配额')

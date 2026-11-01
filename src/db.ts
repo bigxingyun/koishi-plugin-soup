@@ -56,7 +56,10 @@ export function setupModel(ctx: Context) {
     personalGuessQuota: 'unsigned',
     passThreshold: 'float',
     maxDuration: 'unsigned',
+    joinWindow: 'unsigned',
+    idleTimeout: 'unsigned',
     startedAt: 'timestamp',
+    lastActiveAt: 'timestamp',
     settledAt: 'timestamp',
   }, {
     primary: 'id',

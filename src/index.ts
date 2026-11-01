@@ -40,6 +40,7 @@ interface ChannelRules {
   personalGuessQuota: number
   passThreshold: number
   maxDuration: number
+  idleTimeout: number
   joinWindow: number
   renderMode: 'image-first' | 'text'
   renderTheme: RenderTheme
@@ -85,6 +86,7 @@ export function apply(ctx: Context, config: Config) {
       personalGuessQuota: num(map.get('personalGuessQuota'), config.personalGuessQuota),
       passThreshold: num(map.get('passThreshold'), config.passThreshold),
       maxDuration: num(map.get('maxDuration'), config.maxDuration),
+      idleTimeout: num(map.get('idleTimeout'), config.idleTimeout),
       joinWindow: num(map.get('joinWindow'), config.joinWindow),
       renderMode: mode === 'text' || mode === 'image-first' ? mode : config.renderMode,
       renderTheme: theme === 'plain' || theme === 'newspaper' ? theme : config.renderTheme,
@@ -135,6 +137,10 @@ export function apply(ctx: Context, config: Config) {
       case 'already-joined': return t(session, 'joinDuplicate')
       case 'quota-question': return t(session, 'quotaQuestion', [String(data.remaining ?? 0)])
       case 'quota-guess': return t(session, 'quotaGuess')
+      case 'ai-busy': return t(session, 'aiBusy')
+      case 'chitchat': return t(session, 'chitchat')
+      case 'answer-probe': return t(session, 'answerProbe')
+      case 'guess-too-short': return t(session, 'guessTooShort')
       case 'cooldown': return t(session, 'cooldown', [String(data.seconds ?? 0)])
       case 'not-found': return t(session, 'taleNotFound', [String(data.title ?? '')])
       case 'disabled': return t(session, 'taleDisabled')
@@ -204,8 +210,14 @@ export function apply(ctx: Context, config: Config) {
   ): Promise<void> {
     const plan = await game.ensurePlan(tale)
     const useImage = !forceText && rules.renderMode !== 'text'
+    // 太长的汤面排出来会缩成蚂蚁字，不如直接发文字
+    const tooLong = tale.surface.length > config.renderMaxChars
 
-    if (useImage && renderer) {
+    if (useImage && renderer && tooLong) {
+      await sendText(session, t(session, 'renderTooLong'))
+    }
+
+    if (useImage && renderer && !tooLong) {
       const sheet = {
         plan,
         paperName: plan.masthead?.name || config.paperName,
@@ -255,7 +267,10 @@ export function apply(ctx: Context, config: Config) {
       personal,
       Math.round(row.passThreshold * 100),
     ])
-    return config.answeringHint ? text : text.replace(/\n主持人只回答[^\n]*/, '')
+    const idle = row.idleTimeout > 0
+      ? `\n${Math.max(1, Math.round(row.idleTimeout / 60))} 分钟没人动作会自动收场`
+      : ''
+    return (config.answeringHint ? text : text.replace(/\n主持人只回答[^\n]*/, '')) + idle
   }
 
   function verdictText(session: Session, verdict: string): string {
@@ -286,6 +301,10 @@ export function apply(ctx: Context, config: Config) {
   }
 
   ctx.setInterval(() => { void pruneHistory() }, 6 * 3600 * 1000)
+  // 巡检：内存定时器只负责「准时」，这里按库里的状态兜底（重启/热重载后定时器全丢）
+  ctx.setInterval(() => { void game.sweep() }, 5 * 60 * 1000)
+  // 内部事件：手动触发一次巡检（运维排障 / 测试用）
+  ctx.on('soup/sweep' as any, () => game.sweep())
 
   ctx.on('ready', async () => {
     if (config.autoImport) {
@@ -296,6 +315,8 @@ export function apply(ctx: Context, config: Config) {
     }
     await renderer?.pruneCache()
     void pruneHistory()
+    // 启动即兜一次：上一次进程留下的场次该收的收掉
+    void game.sweep()
 
     if (config.modelCheck && ai.available) {
       fetch(`${config.baseURL.replace(/\/+$/, '')}/models`, {
@@ -371,6 +392,7 @@ export function apply(ctx: Context, config: Config) {
           passThreshold: rules.passThreshold,
           maxDuration: rules.maxDuration,
           joinWindow: rules.joinWindow,
+          idleTimeout: rules.idleTimeout,
         })
 
         await sendSheet(session, row, tale, rules, !!options?.text)
@@ -690,6 +712,7 @@ export function apply(ctx: Context, config: Config) {
     阈值: { field: 'passThreshold', min: 50, max: 100, label: '阈值' },
     加入时长: { field: 'joinWindow', min: 10, max: 600, label: '加入时长' },
     时长: { field: 'maxDuration', min: 0, max: 86400, label: '时长' },
+    空闲: { field: 'idleTimeout', min: 0, max: 86400, label: '空闲收场' },
     出图: { field: 'renderMode', min: 0, max: 1, label: '出图' },
   }
 

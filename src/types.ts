@@ -2,7 +2,7 @@ import type { Accent } from './config'
 
 export type Difficulty = 'easy' | 'normal' | 'hard'
 export type SessionStatus = 'joining' | 'running' | 'settled'
-export type EndReason = 'win' | 'empty' | 'manual' | 'timeout' | 'cancel' | 'error'
+export type EndReason = 'win' | 'empty' | 'manual' | 'timeout' | 'cancel' | 'error' | 'idle'
 export type Verdict = 'yes' | 'no' | 'irrelevant' | 'partial'
 export type RenderKind = 'image' | 'text'
 
@@ -93,7 +93,10 @@ export interface GameSession {
   personalGuessQuota: number
   passThreshold: number
   maxDuration: number
+  joinWindow: number
+  idleTimeout: number
   startedAt: Date
+  lastActiveAt: Date
   settledAt: Date
 }
 

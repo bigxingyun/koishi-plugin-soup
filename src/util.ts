@@ -88,6 +88,42 @@ export function cleanSurface(raw: string): string {
     .trim()
 }
 
+const CHITCHAT = /^(?:哈|呵|嘿|嘻|嗯|哦|噢|额|啊|草|笑死|555|6+|牛|强|nb|666|\+1|同上|打卡|签到|在吗|有人吗)+$/i
+
+/**
+ * 纯语气词 / 复读 / 纯符号：不是提问。
+ * 判定必须「整串都由这些构成」，否则「他死了吗」会被误伤。
+ */
+export function looksLikeChitchat(input: string): boolean {
+  const text = normalizeText(input).replace(/[\s,，.!！?？~～。…、:：;；"'“”]+/g, '')
+  if (!text) return true
+  return CHITCHAT.test(text)
+}
+
+const PROBE_PATTERNS: RegExp[] = [
+  /(告诉|说|讲|给|发|输出|透露|写).{0,6}(汤底|答案|真相)/,
+  /(汤底|答案|真相).{0,3}(是什么|是啥|是啥呀|多少|给我)/,
+  /忽略.{0,8}(以上|之前|前面|要求|规则|设定)/,
+  /(开发者|dan|god)\s*模式|system\s*prompt|系统提示词|jailbreak|越狱/i,
+  /(直接|快点|赶紧|马上).{0,4}(说|给|报|念)/,
+]
+
+/**
+ * 冲着汤底来的（"直接告诉我答案""忽略以上要求"）。
+ * 这类请求本地就挡掉：不调模型、不扣次数、也不给它任何"套话"的机会。
+ */
+export function looksLikeAnswerProbe(input: string): boolean {
+  const text = normalizeText(input)
+  if (!text) return false
+  return PROBE_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+/** 提交是否短到判不了（"？""哈哈""不知道"之外的两三字） */
+export function tooShortToJudge(input: string, minLength = 3): boolean {
+  const text = normalizeText(input).replace(/[\s,，.!！?？~～。…、:：;；]+/g, '')
+  return text.length < minLength
+}
+
 /** 汤面是否泄露汤底：找长度 ≥ minLength 的公共子串 */
 export function findLeak(surface: string, answer: string, minLength = 12): string | null {
   const a = normalizeText(answer).replace(/\s+/g, '')
