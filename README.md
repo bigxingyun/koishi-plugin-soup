@@ -74,6 +74,18 @@ npm i @bigxingyun/koishi-plugin-soup
 
 旧写法 `海龟汤 绑定`、`海龟汤 设置` 仍可用一次，会提示迁移到三段式。
 
+### 更省事的写法
+
+```text
+汤 开局          # 汤 = 海龟汤
+问 她死了吗       # 问 = 海龟汤 问
+提交 榜一分尸了   # 提交 = 海龟汤 提交
+```
+
+或者**直接引用** bot 发的那张报纸，输入你的问题即可——不用再打指令。指令始终优先，`海龟汤 状态` 这类不会被当成提问。
+
+> 短别名默认开启；若 `问` / `提交` 已被别的插件占用，会自动跳过并在日志里记一条 debug。`引用即提问` 也能在配置里关掉。
+
 ## 汤文件格式
 
 放在 `data/soup/tales/*.json`，单文件可放一条或数组：
@@ -123,6 +135,8 @@ npm i @bigxingyun/koishi-plugin-soup
 | `renderMode` | `image-first` | 图片优先，失败降级文本 |
 | `renderFormat` | `jpg` | PNG 体积约为 JPEG 的 6 倍 |
 | `seedBundled` | `true` | 汤库为空时自动铺 3 锅内置样例汤 |
+| `shortCommands` | `true` | 注册短别名：汤 / 问 / 提交 / 开局 |
+| `quoteAsk` | `true` | 引用 bot 消息时，直接当提问处理 |
 
 全部 44 项配置及默认值见[需求规格](https://github.com/bigxingyun/koishi-plugin-soup/blob/main/需求分析.md) §7。
 
@@ -177,6 +191,7 @@ npm run verify:render      # 或：$env:CHROME_PATH="D:\chrome\chrome.exe"; node
 
 ## 更新日志
 
+- **0.2.1** — 短别名（`汤` / `问` / `提交` / `开局`）与「引用即提问」；修正 help 里被当成消息元素解析的 `<问题>`；重写全部指令描述
 - **0.2.0** — 内置 3 锅样例汤随包发布，首次启动自动铺入；新增 `海龟汤 诊断` 站点连通性测试；AI 输出的版面会做泄底检测
 - **0.1.1** — 数据目录改为 `data/soup/`（自动兼容老目录）；README 补效果图与 FAQ
 - **0.1.0** — 首个可用版本：三级指令、配额、AI 判词与评分、报纸图渲染与降级

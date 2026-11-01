@@ -30,6 +30,8 @@ export interface Config {
   allowPartialAnswer: boolean
   showScoreDetail: boolean
   hostCanEnd: boolean
+  shortCommands: boolean
+  quoteAsk: boolean
 
   // ---- AI
   baseURL: string
@@ -115,6 +117,10 @@ export const Config: Schema<Config> = Schema.intersect([
       .description('允许「是也不是」判词（实验性）'),
     showScoreDetail: Schema.boolean().default(false)
       .description('评分时展示关键要素命中情况'),
+    shortCommands: Schema.boolean().default(true)
+      .description('注册短别名：汤 = 海龟汤，问 / 提交 / 开局 可直接使用（被占用时自动跳过）'),
+    quoteAsk: Schema.boolean().default(true)
+      .description('引用 bot 的消息时，直接把内容当作提问（不用再打「海龟汤 问」）'),
     hostCanEnd: Schema.boolean().default(true)
       .description('发起人可以结束自己开的场次'),
   }).description('玩法规则'),

@@ -281,8 +281,9 @@ export function apply(ctx: Context, config: Config) {
   }, true)
 
   // ---------------------------------------------------------------- L1
-  ctx.command('海龟汤', { authority: 1 })
-    .usage('海龟汤 开局 → 海龟汤 问 <问题> → 海龟汤 提交 <推理>')
+  const rootCommand = ctx.command('海龟汤', { authority: 1 })
+  rootCommand
+    .usage('开始：海龟汤 开局\n提问：海龟汤 问 你的问题\n提交：海龟汤 提交 你的推理')
     .action(async ({ session }) => {
       if (!session) return
 
@@ -302,8 +303,9 @@ export function apply(ctx: Context, config: Config) {
     })
 
   // ---------------------------------------------------------------- 开局
-  ctx.command('海龟汤.开局 [tale:text]', { authority: 1 })
-    .option('text', '-t, --text 本场强制纯文本')
+  const startCommand = ctx.command('海龟汤.开局 [tale:text]', { authority: 1 })
+  startCommand
+    .option('text', '-t, --text 本场只发文字，不出报纸图')
     .action(async ({ session, options }, keyword) => {
       if (!session) return
       return run(session, async () => {
@@ -352,11 +354,10 @@ export function apply(ctx: Context, config: Config) {
   })
 
   // ---------------------------------------------------------------- 问
-  ctx.command('海龟汤.问 <content:text>', { authority: 1 }).action(async ({ session }, content) => {
-    if (!session) return
+  async function askOnce(session: Session, content: string): Promise<string> {
     return run(session, async () => {
       const row = await game.requireRunning(channelKeyOf(session))
-      const result = await game.ask(row, userKeyOf(session), content || '')
+      const result = await game.ask(row, userKeyOf(session), content)
 
       const pieces: string[] = []
       if (config.verdictWithAt) pieces.push(t(session, 'verdictAtPrefix', [h.at(session.userId).toString()]))
@@ -370,10 +371,17 @@ export function apply(ctx: Context, config: Config) {
       }
       return pieces.join('')
     })
+  }
+
+  const askCommand = ctx.command('海龟汤.问 <content:text>', { authority: 1 })
+  askCommand.action(async ({ session }, content) => {
+    if (!session) return
+    return askOnce(session, content || '')
   })
 
   // ---------------------------------------------------------------- 提交
-  ctx.command('海龟汤.提交 <content:text>', { authority: 1 }).action(async ({ session }, content) => {
+  const guessCommand = ctx.command('海龟汤.提交 <content:text>', { authority: 1 })
+  guessCommand.action(async ({ session }, content) => {
     if (!session) return
     return run(session, async () => {
       const row = await game.requireRunning(channelKeyOf(session))
@@ -421,7 +429,7 @@ export function apply(ctx: Context, config: Config) {
 
   // ---------------------------------------------------------------- 汤面 / 汤底 / 状态 / 结束
   ctx.command('海龟汤.汤面', { authority: 1 })
-    .option('text', '-t, --text 纯文本发送')
+    .option('text', '-t, --text 用文字重发')
     .action(async ({ session, options }) => {
       if (!session) return
       return run(session, async () => {
@@ -479,7 +487,7 @@ export function apply(ctx: Context, config: Config) {
 
   // ---------------------------------------------------------------- 战绩
   ctx.command('海龟汤.战绩', { authority: 1 })
-    .option('self', '-s, --self 只看自己的数据')
+    .option('self', '-s, --self 只看自己猜中过几锅')
     .action(async ({ session, options }) => {
       if (!session) return
       const rows = await ctx.database.get(TABLES.session, { channelKey: channelKeyOf(session), status: 'settled' })
@@ -742,7 +750,7 @@ export function apply(ctx: Context, config: Config) {
 
   // ---------------------------------------------------------------- 站点诊断
   ctx.command('海龟汤.诊断', { authority: 1 })
-    .usage('检查 AI 站点连通性：Key、/models、模型名、能否真正跑通一次推理')
+    .usage('依次检查：Key 是否配置 → 站点是否可达 → 模型名是否存在 → 能否真正跑一次推理')
     .option('fast', '-f, --fast 只测站点与模型列表，不做推理调用')
     .action(async ({ session, options }) => {
       if (!session) return
@@ -778,4 +786,38 @@ export function apply(ctx: Context, config: Config) {
       ]))
       return lines.join('\n')
     })
+
+  // ---------------------------------------------------------------- 短别名
+  // 别名冲突时 Koishi 会抛 duplicate command names，所以逐个 try，撞了就跳过。
+  const alias = (command: { alias(name: string): unknown }, name: string) => {
+    try {
+      command.alias(name)
+    } catch {
+      logger.debug('别名「%s」已被其他插件占用，跳过', name)
+    }
+  }
+
+  if (config.shortCommands) {
+    alias(rootCommand, '汤')
+    alias(startCommand, '开局')
+    alias(askCommand, '问')
+    alias(guessCommand, '提交')
+  }
+
+  // ---------------------------------------------------------------- 引用即提问
+  // 必须注册在指令之后：指令先被 commander 处理，这里只会收到没匹配到指令的普通消息。
+  ctx.middleware(async (session, next) => {
+    if (!config.quoteAsk) return next()
+
+    const quoted = (session.event as any)?.message?.quote
+    if (!quoted) return next()
+
+    const content = session.content?.trim()
+    if (!content) return next()
+
+    const row = await game.active(channelKeyOf(session))
+    if (!row || row.status !== 'running') return next()
+
+    return askOnce(session, content)
+  })
 }

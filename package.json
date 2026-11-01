@@ -1,6 +1,6 @@
 {
   "name": "@bigxingyun/koishi-plugin-soup",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "AI 驱动的海龟汤主持人：是/不是/无关判词、相似度评分、做旧报纸汤面",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/unit.test.js tests/plugin.test.js tests/render.test.js tests/room.test.js tests/routing.test.js tests/image.test.js tests/deepseek.test.js tests/seed.test.js",
+    "test": "npm run build && node --test tests/unit.test.js tests/plugin.test.js tests/render.test.js tests/room.test.js tests/routing.test.js tests/image.test.js tests/deepseek.test.js tests/seed.test.js tests/shortcut.test.js",
     "render:samples": "pwsh -File docs/render-sample/render.ps1",
     "verify:render": "npm run build && node scripts/verify-render.js"
   },
@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@koishijs/plugin-database-memory": "^3.7.0",
+    "@koishijs/plugin-help": "^2.4.6",
     "@koishijs/plugin-mock": "^2.6.6",
     "@koishijs/plugin-server": "^3.2.9",
     "@types/node": "^22.10.2",
