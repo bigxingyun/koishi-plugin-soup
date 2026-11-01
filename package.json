@@ -1,6 +1,6 @@
 {
   "name": "@bigxingyun/koishi-plugin-soup",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "AI 驱动的海龟汤主持人：是/不是/无关判词、相似度评分、做旧报纸汤面",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
