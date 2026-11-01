@@ -16,8 +16,10 @@ import { formatDuration, splitMessage } from './util'
 export { Config, name } from './config'
 
 export const inject = {
+  // 注意：puppeteer 不能写在这里。声明成 optional 之后，cordis 会把该服务在本插件
+  // 作用域里遮罩成 undefined（连 ctx.root 都取不到），导致渲染永远走降级。
+  // 可选依赖的正确写法是下面的 ctx.inject(['puppeteer'], ...)。
   required: ['database'],
-  optional: ['puppeteer'],
 }
 
 export const usage = `把 bot 变成 AI 海龟汤主持人。
@@ -47,7 +49,14 @@ export function apply(ctx: Context, config: Config) {
   const logger = ctx.logger('situation-puzzle')
   const ai = new AIClient(ctx, config, logger)
   const game = new Game(ctx, config, logger, ai)
-  const renderer = new Renderer(ctx, config, logger)
+  // puppeteer 是可选服务：不能直接写进 inject.optional（那样会被 cordis 遮罩成 undefined），
+  // 必须用 ctx.inject 包成子插件——服务存在时才实例化渲染器，不存在就永远走纯文本。
+  let renderer: Renderer | null = null
+  ctx.inject(['puppeteer'], (ctx) => {
+    renderer = new Renderer(ctx, config, logger)
+    logger.info('已检测到 puppeteer 服务，汤面默认发送报纸图（可用「海龟汤 渲染 关闭」切回纯文本）')
+    ctx.on('dispose', () => { renderer = null })
+  })
   const pending = new Map<string, { code: string; expires: number }>()
 
   ctx.on('dispose', () => game.dispose())
@@ -171,13 +180,13 @@ export function apply(ctx: Context, config: Config) {
     const plan = await game.ensurePlan(tale)
     const useImage = !forceText && rules.renderMode !== 'text'
 
-    if (useImage) {
+    if (useImage && renderer) {
       const sheet = {
         plan,
         paperName: plan.masthead?.name || config.paperName,
         issue: tale.id,
         date: new Date(),
-        difficulty: tale.difficulty,
+        difficulty: difficultyLabel(tale.difficulty),
         tags: tale.tags ?? [],
         questionQuota: sessionRow.questionQuota,
         guessQuota: sessionRow.guessQuota,
@@ -193,7 +202,7 @@ export function apply(ctx: Context, config: Config) {
           await ctx.database.set(TABLES.session, sessionRow.id, { renderMode: 'image' })
           return
         } catch (error) {
-          renderer.reportSendFailure()
+          renderer?.reportSendFailure()
           logger.warn('图片发送失败，降级文本：%s', (error as Error).message)
         }
       }
@@ -236,7 +245,7 @@ export function apply(ctx: Context, config: Config) {
       const report = await importTales(ctx, config, logger)
       if (report.errors.length) logger.warn('汤库有 %d 条失败记录', report.failed)
     }
-    await renderer.pruneCache()
+    await renderer?.pruneCache()
 
     if (config.modelCheck && ai.available) {
       fetch(`${config.baseURL.replace(/\/+$/, '')}/models`, {
@@ -657,7 +666,7 @@ export function apply(ctx: Context, config: Config) {
     if (!session) return
     const rules = await channelRules(channelKeyOf(session))
     return t(session, 'renderStatus', [
-      renderer.available ? t(session, 'renderBackendPuppeteer') : t(session, 'renderBackendText'),
+      renderer?.available ? t(session, 'renderBackendPuppeteer') : t(session, 'renderBackendText'),
       config.renderTheme,
       config.renderCacheMaxMB,
       rules.renderMode,
@@ -668,7 +677,7 @@ export function apply(ctx: Context, config: Config) {
     if (!session) return
     const rules = await channelRules(channelKeyOf(session))
     return t(session, 'renderStatus', [
-      renderer.available ? t(session, 'renderBackendPuppeteer') : t(session, 'renderBackendText'),
+      renderer?.available ? t(session, 'renderBackendPuppeteer') : t(session, 'renderBackendText'),
       config.renderTheme,
       config.renderCacheMaxMB,
       rules.renderMode,
@@ -679,7 +688,7 @@ export function apply(ctx: Context, config: Config) {
     if (!session) return
     return run(session, async () => {
       await requireMaster(session)
-      if (!renderer.available) return t(session, 'renderNeedsBackend')
+      if (!renderer?.available) return t(session, 'renderNeedsBackend')
 
       const rows = await listTales(ctx, { all: true })
       const tale = rows[0]
@@ -691,7 +700,7 @@ export function apply(ctx: Context, config: Config) {
         paperName: plan.masthead?.name || config.paperName,
         issue: tale.id,
         date: new Date(),
-        difficulty: tale.difficulty,
+        difficulty: difficultyLabel(tale.difficulty),
         tags: tale.tags ?? [],
         questionQuota: config.defaultQuestionQuota,
         guessQuota: config.defaultGuessQuota,

@@ -103,6 +103,21 @@ npm run typecheck
 渲染样张与版面规划的实现参考在 [`docs/render-sample/`](docs/render-sample/)。
 需求规格见 [`需求分析.md`](需求分析.md)。
 
+### 真实出图验证（需要本机 Chrome）
+
+```sh
+npm run verify:render      # 或：$env:CHROME_PATH="D:\chrome\chrome.exe"; node scripts/verify-render.js
+```
+
+脚本会起一个无头 Koishi 应用（mock 适配器 + 内存数据库 + `@koishijs/plugin-http` + `koishi-plugin-puppeteer`），
+自动发送一次 `海龟汤 开局`，把插件**实际发出**的图片落到 `docs/verify/real-render.jpg`；没有收到图片就以非零码退出。
+
+![真实渲染结果](docs/verify/real-render.jpg)
+
+> 两个只在裸 Context 里才会遇到的坑：`koishi-plugin-puppeteer` 声明了 `inject = ['http']`，必须先装
+> `@koishijs/plugin-http`；另外它提供的服务在 `ready` 之后才真正就绪，脚本里要等一会儿再发消息。
+> 正常 Koishi 应用这两个条件都天然满足。
+
 ## 已知限制
 
 - 长汤面（>1200 字）会缩字号，仍过长时降级文本；尚未按高度自适应

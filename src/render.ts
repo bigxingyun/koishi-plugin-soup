@@ -210,8 +210,14 @@ export class Renderer {
     private logger: Logger,
   ) {}
 
+  /**
+   * 取 puppeteer 服务。
+   * 注意：本插件把 puppeteer 声明为 optional，作用域里的 `ctx.puppeteer` 在 apply 阶段
+   * 是 undefined（服务晚于插件加载）；服务本体挂在 root 上，所以这里回退到 `ctx.root`。
+   */
   private get service(): any {
-    return (this.ctx as any).puppeteer
+    const ctx = this.ctx as any
+    return ctx.puppeteer ?? ctx.root?.puppeteer
   }
 
   get available(): boolean {
@@ -295,7 +301,7 @@ export class Renderer {
   }
 
   /**
-   * 渲染一张报纸。返回 null 表示应当降级为纯文本。
+   * 渲染一张报纸。返回 ok=false 表示应当降级为纯文本。
    * 注意：返回的 Buffer 已经是目标编码（jpg/png/webp）。
    */
   async render(sheet: SheetContext): Promise<RenderOutput> {
@@ -308,26 +314,18 @@ export class Renderer {
     const html = buildNewspaperHTML(sheet)
     const started = Date.now()
     try {
-      let raw: string
-      try {
-        raw = await this.service.render(html, undefined, {
-          width: this.config.renderWidth,
-          deviceScaleFactor: this.config.renderScale,
-          imageType: this.config.renderFormat === 'png' ? 'png' : this.config.renderFormat === 'webp' ? 'webp' : 'jpeg',
-        })
-      } catch (error) {
-        this.logger.debug('puppeteer 带参渲染失败，回退默认参数：%s', (error as Error).message)
-        raw = await this.service.render(html)
+      const raw = await this.renderWithBackend(html)
+      const image = extractImage(raw)
+      if (!image) throw new Error('渲染结果无法解析')
+      if (image.buffer.length < 1024) throw new Error('渲染结果为空')
+      if (image.buffer.length > 5 * 1024 * 1024) {
+        throw new Error(`渲染结果过大：${(image.buffer.length / 1024 / 1024).toFixed(1)}MB`)
       }
 
-      const buffer = decodeImage(raw)
-      if (!buffer || buffer.length < 1024) throw new Error('渲染结果为空')
-      if (buffer.length > 5 * 1024 * 1024) throw new Error(`渲染结果过大：${(buffer.length / 1024 / 1024).toFixed(1)}MB`)
-
-      await this.writeCache(key, buffer)
+      await this.writeCache(key, image.buffer)
       this.failures = 0
-      this.logger.debug('渲染完成：%d KB / %d ms', Math.round(buffer.length / 1024), Date.now() - started)
-      return { ok: true, image: buffer, mime: this.mime, cacheKey: key }
+      this.logger.debug('渲染完成：%d KB / %d ms', Math.round(image.buffer.length / 1024), Date.now() - started)
+      return { ok: true, image: image.buffer, mime: image.mime, cacheKey: key }
     } catch (error) {
       this.failures++
       this.logger.warn('渲染失败（第 %d 次）：%s', this.failures, (error as Error).message)
@@ -337,6 +335,40 @@ export class Renderer {
         this.logger.warn('渲染熔断 %d 秒，期间直接发文本', this.config.renderCooldown)
       }
       return { ok: false }
+    }
+  }
+
+  /**
+   * 调 puppeteer 出图。
+   *
+   * 关键：`koishi-plugin-puppeteer` 的 `render(content, callback?)` 默认只截 body 并返回
+   * `<img src="data:image/png;base64,..."/>` 字符串；想控制 viewport 与 jpg/webp 编码，
+   * 必须在 callback 里自己截图并返回我们的 data URL。
+   */
+  private async renderWithBackend(html: string): Promise<string> {
+    const service = this.service
+    const format = this.config.renderFormat
+    const type = format === 'jpg' ? 'jpeg' : format
+    const mime = this.mime
+
+    try {
+      return await service.render(html, async (page: any) => {
+        await page.setViewport({
+          width: this.config.renderWidth,
+          height: 240,
+          deviceScaleFactor: this.config.renderScale,
+        })
+        const handle = await page.$('body')
+        const clip = handle ? await handle.boundingBox() : null
+        const options: Record<string, unknown> = clip ? { clip, type } : { fullPage: true, type }
+        if (type === 'jpeg') options.quality = 86
+        const buffer = await page.screenshot(options)
+        return `data:${mime};base64,${Buffer.from(buffer).toString('base64')}`
+      })
+    } catch (error) {
+      // 兼容只实现 render(html) 的后端，或 callback 签名不同的旧版本
+      this.logger.debug('带 callback 渲染失败，回退默认截图：%s', (error as Error).message)
+      return await service.render(html)
     }
   }
 
@@ -356,15 +388,39 @@ export class Renderer {
   }
 }
 
-/** puppeteer 可能返回 dataURL 或裸 base64，两种都吃 */
-export function decodeImage(raw: string): Buffer | null {
+export interface ExtractedImage {
+  buffer: Buffer
+  mime: string
+}
+
+/**
+ * 从后端返回值里取出图片。三种形态都要吃：
+ * 1. `<img src="data:image/png;base64,..."/>` —— koishi-plugin-puppeteer 的默认返回
+ * 2. `data:image/jpeg;base64,...` —— 我们自己在 callback 里返回的
+ * 3. 裸 base64
+ */
+export function extractImage(raw: string): ExtractedImage | null {
   if (!raw || typeof raw !== 'string') return null
-  const base64 = raw.startsWith('data:') ? raw.slice(raw.indexOf(',') + 1) : raw
-  try {
-    return Buffer.from(base64, 'base64')
-  } catch {
-    return null
+
+  const element = /src="(data:([^;"]+);base64,([^"]+))"/.exec(raw)
+  if (element) return { buffer: Buffer.from(element[3], 'base64'), mime: element[2] }
+
+  if (raw.startsWith('data:')) {
+    const comma = raw.indexOf(',')
+    if (comma < 0) return null
+    const mime = /^data:([^;]+)/.exec(raw)?.[1] || 'image/png'
+    return { buffer: Buffer.from(raw.slice(comma + 1), 'base64'), mime }
   }
+
+  if (/^[A-Za-z0-9+/=\s]+$/.test(raw)) {
+    return { buffer: Buffer.from(raw, 'base64'), mime: 'image/png' }
+  }
+  return null
+}
+
+/** 兼容旧调用：只要 Buffer */
+export function decodeImage(raw: string): Buffer | null {
+  return extractImage(raw)?.buffer ?? null
 }
 
 /** 防御性检查：渲染出来的 plan 不得夹带汤底片段 */

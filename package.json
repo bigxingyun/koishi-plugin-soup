@@ -29,7 +29,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test tests/unit.test.js tests/plugin.test.js tests/render.test.js tests/room.test.js tests/routing.test.js tests/image.test.js",
-    "render:samples": "pwsh -File docs/render-sample/render.ps1"
+    "render:samples": "pwsh -File docs/render-sample/render.ps1",
+    "verify:render": "npm run build && node scripts/verify-render.js"
   },
   "peerDependencies": {
     "koishi": "^4.18.11"
@@ -37,8 +38,10 @@
   "devDependencies": {
     "@koishijs/plugin-database-memory": "^3.7.0",
     "@koishijs/plugin-mock": "^2.6.6",
+    "@koishijs/plugin-server": "^3.2.9",
     "@types/node": "^22.10.2",
     "koishi": "^4.18.11",
+    "koishi-plugin-puppeteer": "^3.9.0",
     "typescript": "^5.7.2"
   },
   "koishi": {
