@@ -144,7 +144,7 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description('AI 服务'),
 
   Schema.object({
-    talesDir: Schema.string().default('data/situation-puzzle/tales')
+    talesDir: Schema.string().default('data/soup/tales')
       .description('汤文件目录（相对 Koishi 工作目录）'),
     autoImport: Schema.boolean().default(true)
       .description('启动时自动扫描导入'),
@@ -173,7 +173,7 @@ export const Config: Schema<Config> = Schema.intersect([
       .description('超过该字数自动缩字号，仍超则降级文本'),
     renderTimeout: Schema.natural().min(2).max(30).default(8)
       .description('渲染 + 发送超时（秒）'),
-    renderCacheDir: Schema.string().default('data/situation-puzzle/cache')
+    renderCacheDir: Schema.string().default('data/soup/cache')
       .description('图片缓存目录'),
     renderCacheMaxMB: Schema.natural().max(2048).default(200)
       .description('缓存上限（MB），0 表示不缓存'),

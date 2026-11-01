@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs'
+import { existsSync, promises as fs } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { Context, Logger } from 'koishi'
 import type { Config } from './config'
@@ -114,8 +114,19 @@ export function buildTaleDraft(raw: RawTale, source: string, ignoreLeak: boolean
   }
 }
 
+const LEGACY_TALES_DIR = 'data/situation-puzzle/tales'
+
+/**
+ * 解析汤库目录。
+ * 0.1.0 用的是 `data/situation-puzzle/tales`；改名成 soup 之后，如果新目录还没建、
+ * 而老目录里有汤，就继续用老目录——不让已部署的人因为改名而「汤库突然空了」。
+ */
 export function resolveTalesDir(ctx: Context, config: Config): string {
-  return resolve(ctx.baseDir, config.talesDir)
+  const dir = resolve(ctx.baseDir, config.talesDir)
+  if (existsSync(dir)) return dir
+  const legacy = resolve(ctx.baseDir, LEGACY_TALES_DIR)
+  if (config.talesDir === 'data/soup/tales' && existsSync(legacy)) return legacy
+  return dir
 }
 
 async function readTaleFiles(dir: string): Promise<Array<{ file: string; raw: unknown }>> {

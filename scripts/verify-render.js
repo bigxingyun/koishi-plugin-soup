@@ -61,7 +61,7 @@ async function main() {
     args: ['--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--font-render-hinting=none'],
   })
   app.plugin(plugin, {
-    talesDir: 'data/situation-puzzle/tales',
+    talesDir: 'data/soup/tales',
     apiKey: '',
     modelCheck: false,
     autoImport: true,
