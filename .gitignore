@@ -1,0 +1,36 @@
+# ---- 本地凭据（含 npm token、SSH 私钥路径等，严禁提交）----
+凭据.local.md
+*.local.md
+.env
+.env.*
+!/.env.example
+*.pem
+*.key
+
+# ---- 依赖与构建产物 ----
+node_modules/
+lib/
+dist/
+*.tsbuildinfo
+.yarn/
+.pnpm-store/
+
+# ---- 运行时数据与日志 ----
+logs/
+*.log
+data/runtime/
+data/*.sqlite
+
+# ---- 编辑器与系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 渲染样张的中间产物 ----
+docs/render-sample/_build-*.html
+docs/render-sample/_raw*.png
+
+# ---- 渲染样张：只提交压缩后的 jpg，png 仅本地生成 ----
+docs/render-sample/sample-*.png

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{TITLE}} · 报纸图</title>
+<style>
+  :root{
+    --ink:#241a10;
+    --ink-2:#4a3a26;
+    --accent:{{ACCENT_HEX}};
+    --accent-deep:{{ACCENT_DEEP}};
+    --f-serif:"SimSun","宋体","Songti SC",serif;
+    --f-hei:"SimHei","黑体","Microsoft YaHei",sans-serif;
+    --f-kai:"KaiTi","楷体","STKaiti",serif;
+    --f-li:"LiSu","隶书","STLiti","KaiTi",serif;
+    --body-size:{{FONT_PX}}px;
+    --body-lh:{{LINE_HEIGHT}};
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ background:#cfbc95; }
+  body{ width:720px; padding:14px 10px; font-family:var(--f-serif); -webkit-font-smoothing:antialiased; }
+
+  .paper{
+    position:relative; width:700px; padding:{{PAD_TOP}}px 38px 22px; color:var(--ink);
+    background:radial-gradient(140% 90% at 18% -10%, #f7f0da 0%, #efe4c6 42%, #e6d7b4 74%, #ddcaa3 100%);
+    box-shadow:
+      0 2px 20px rgba(57,38,12,.34),
+      0 0 0 1px rgba(96,68,28,.20),
+      inset 0 0 70px rgba(120,84,30,.20),
+      inset 0 0 14px rgba(90,60,20,.18);
+    overflow:hidden;
+  }
+  .paper::before{
+    content:""; position:absolute; inset:0;
+    background:url(tex/grain.png) repeat; mix-blend-mode:multiply;
+    opacity:{{GRAIN_OPACITY}}; pointer-events:none; z-index:5;
+  }
+  .paper::after{
+    content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(38% 30% at 88% 6%, rgba(118,82,34,.40), transparent 70%),
+      radial-gradient(30% 26% at 4% 62%, rgba(120,84,36,.34), transparent 72%),
+      radial-gradient(26% 22% at 62% 99%, rgba(112,76,30,.32), transparent 70%);
+    mix-blend-mode:multiply; pointer-events:none; z-index:5;
+  }
+  .stain{ position:absolute; z-index:4; mix-blend-mode:multiply; pointer-events:none; }
+  .s1{ width:300px; left:-70px; top:250px; opacity:.55; }
+  .s2{ width:250px; right:-60px; bottom:60px; opacity:.4; }
+  .content{ position:relative; z-index:6; }
+
+  .rule-thick{ border-top:3px solid var(--ink); }
+  .rule-thin{ border-top:1px solid rgba(36,26,16,.55); }
+
+  .masthead{ display:flex; align-items:flex-end; justify-content:space-between; padding:7px 0 6px; }
+  .masthead .side{
+    font-family:var(--f-kai); font-size:11px; line-height:1.5;
+    color:var(--ink-2); letter-spacing:.4px; width:96px;
+  }
+  .masthead .side.right{ text-align:right; }
+  .masthead h1{
+    font-family:var(--f-li); font-size:{{MASTHEAD_PX}}px; line-height:1; font-weight:400;
+    letter-spacing:{{MASTHEAD_LS}}px; text-indent:{{MASTHEAD_LS}}px; color:#1c140b;
+    text-shadow:0 0 1px rgba(36,26,16,.5);
+  }
+  .masthead .en{
+    display:block; text-align:center; font-family:Georgia,"Times New Roman",serif;
+    font-size:9px; letter-spacing:3.6px; text-indent:3.6px;
+    color:var(--ink-2); margin-top:6px; text-transform:uppercase;
+  }
+
+  .dateline{
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:10.5px; color:var(--ink-2); letter-spacing:.3px; padding:4px 0 3px;
+    font-family:var(--f-kai);
+  }
+  .dateline .dot{ opacity:.5; margin:0 6px; }
+
+  .headline-wrap{ text-align:center; padding:{{HEAD_PAD}}px 0 10px; }
+  .kicker{
+    font-family:var(--f-hei); font-size:13px; letter-spacing:2.5px;
+    color:var(--accent); margin-bottom:9px;
+  }
+  h2.title{
+    font-family:var(--f-hei); font-size:{{TITLE_PX}}px; line-height:1.14;
+    letter-spacing:6px; text-indent:6px; font-weight:700; color:#170f07;
+    text-shadow:
+      1.2px 0 0 {{ACCENT_TINT}},
+      -1.2px 0 0 rgba(46,66,96,.12),
+      0 0 .6px rgba(36,26,16,.45);
+  }
+  .deck{
+    font-family:var(--f-kai); font-size:13px; color:var(--ink-2);
+    letter-spacing:.6px; margin-top:9px;
+  }
+  .rule-dot{
+    display:flex; align-items:center; gap:8px; justify-content:center;
+    margin:12px 0 0; color:rgba(36,26,16,.45);
+  }
+  .rule-dot i{ flex:1; height:1px; background:currentColor; }
+  .rule-dot b{ font-size:8px; font-weight:400; letter-spacing:2px; }
+
+  .body-text{
+    margin-top:{{BODY_MT}}px; column-count:{{COLUMNS}}; column-gap:30px;
+    column-rule:1px solid rgba(36,26,16,.28);
+    font-size:var(--body-size); line-height:var(--body-lh);
+    text-align:justify; text-justify:inter-ideograph; color:#2a1e12;
+  }
+  .body-text p{ text-indent:2em; margin-bottom:.55em; }
+  .body-text p:first-child{ text-indent:0; }
+  .body-text p:last-child{ margin-bottom:0; }
+  .drop{
+    float:left; font-family:var(--f-hei); font-size:{{DROP_PX}}px; line-height:.94;
+    padding:2px 5px 0 0; color:#170f07;
+  }
+  .wk{ font-family:var(--f-hei); font-weight:700; letter-spacing:.5px; }
+
+  .sign-row{ display:flex; align-items:center; justify-content:space-between; margin-top:10px; }
+  .byline{ font-family:var(--f-kai); font-size:10.5px; color:var(--ink-2); letter-spacing:.4px; }
+
+  .seal{
+    flex:0 0 auto; width:74px; height:74px; margin-right:4px;
+    border:3px solid var(--accent); border-radius:3px; color:var(--accent);
+    display:grid; grid-template-columns:1fr 1fr;
+    align-content:center; justify-items:center;
+    font-family:var(--f-hei); font-size:19px; line-height:1.15; letter-spacing:1px;
+    opacity:{{STAMP_OPACITY}}; transform:rotate({{STAMP_ANGLE}}deg);
+    mix-blend-mode:multiply; padding:5px;
+    box-shadow:inset 0 0 0 1px {{ACCENT_SHADOW}};
+  }
+
+  .bottom{
+    display:grid; grid-template-columns:1fr 1fr;
+    margin-top:14px; border-top:1px solid rgba(36,26,16,.5);
+  }
+  .box{ padding:11px 14px 4px; }
+  .box + .box{ border-left:1px solid rgba(36,26,16,.32); }
+  .box h3{
+    font-family:var(--f-hei); font-size:11px; letter-spacing:2px;
+    color:var(--accent); margin-bottom:6px; font-weight:700;
+  }
+  .box p{ font-size:11.5px; line-height:1.85; color:#33261a; text-align:justify; }
+  .box kbd{ font-family:var(--f-hei); font-size:10.5px; border-bottom:1px dashed rgba(36,26,16,.45); }
+
+  .foot{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-top:12px; padding-top:6px; border-top:1px solid rgba(36,26,16,.5);
+    font-family:var(--f-kai); font-size:9.5px; color:var(--ink-2); letter-spacing:.4px;
+  }
+</style>
+</head>
+<body>
+  <div class="paper">
+    <img class="stain s1" src="tex/blot1.png" alt="">
+    <img class="stain s2" src="tex/blot2.png" alt="">
+
+    <div class="content">
+      <div class="rule-thick"></div>
+      <div class="masthead">
+        <div class="side">{{ISSUE_LINE}}</div>
+        <div>
+          <h1>{{MASTHEAD}}</h1>
+          <span class="en">{{MASTHEAD_EN}}</span>
+        </div>
+        <div class="side right">{{DATE_LINE}}</div>
+      </div>
+      <div class="rule-thick"></div>
+      <div class="rule-thin" style="margin-top:2px"></div>
+
+      <div class="dateline">
+        <div>{{DATELINE_LEFT}}</div>
+        <div>{{DATELINE_RIGHT}}</div>
+      </div>
+
+      <div class="headline-wrap">
+        <div class="kicker">{{KICKER}}</div>
+        <h2 class="title">{{TITLE}}</h2>
+        <div class="deck">{{DECK}}</div>
+        <div class="rule-dot"><i></i><b>◆</b><i></i></div>
+      </div>
+
+      <div class="body-text">
+{{BODY_HTML}}
+      </div>
+
+      <div class="sign-row">
+        <div class="byline">{{BYLINE}}</div>
+        <div class="seal">{{STAMP_CELLS}}</div>
+      </div>
+
+      <div class="bottom">
+        <div class="box">
+          <h3>{{NOTICE_TITLE}}</h3>
+          <p>{{NOTICE_LINES}}</p>
+        </div>
+        <div class="box">
+          <h3>{{HOWTO_TITLE}}</h3>
+          <p>{{HOWTO_LINES}}</p>
+        </div>
+      </div>
+
+      <div class="foot">
+        <div>{{FOOTER_LEFT}}</div>
+        <div>{{FOOTER_RIGHT}}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
