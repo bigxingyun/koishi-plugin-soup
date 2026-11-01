@@ -3,6 +3,7 @@ import type { AIClient, ScoreResult } from './ai'
 import { AIError } from './ai'
 import type { Config } from './config'
 import { TABLES } from './db'
+import { planLeaksAnswer } from './render'
 import type { LayoutPlan, Tale, TaleSnapshot, GameSession, Verdict } from './types'
 import { normalizeQuestion } from './util'
 
@@ -411,6 +412,11 @@ export class Game {
         surface: tale.surface,
       })
       if (plan.title && plan.body?.length) {
+        // 引题/副题是模型写的，必须挡一道「有没有把汤底说出去」
+        if (planLeaksAnswer(plan, tale.answer)) {
+          this.logger.warn('版面规划疑似泄底，已改用默认版面：%s', tale.title)
+          return defaultPlan(tale)
+        }
         await this.ctx.database.set(TABLES.tale, tale.id, { newspaper: plan })
         return plan
       }

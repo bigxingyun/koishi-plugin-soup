@@ -129,6 +129,43 @@ export function resolveTalesDir(ctx: Context, config: Config): string {
   return dir
 }
 
+/**
+ * 内置样例汤所在目录（随 npm 包一起发布）。
+ * lib/tale.js 的 __dirname 是 <pkg>/lib，所以 ../data 就是包根目录。
+ */
+const BUNDLED_TALES_DIR = resolve(__dirname, '..', 'data', 'soup', 'tales')
+
+/**
+ * 首次运行时把内置样例汤铺到用户的汤库目录。
+ * 只在该目录一个 json 都没有时才动手：用户清空自己的汤库后不会被重新塞满。
+ */
+export async function seedBundledTales(ctx: Context, config: Config, logger: Logger): Promise<number> {
+  const target = resolveTalesDir(ctx, config)
+
+  let existing: string[] = []
+  try {
+    existing = (await fs.readdir(target)).filter((file) => file.toLowerCase().endsWith('.json'))
+  } catch {
+    // 目录还不存在，下面会创建
+  }
+  if (existing.length) return 0
+  if (!existsSync(BUNDLED_TALES_DIR)) return 0
+
+  try {
+    const files = (await fs.readdir(BUNDLED_TALES_DIR)).filter((file) => file.toLowerCase().endsWith('.json'))
+    if (!files.length) return 0
+    await fs.mkdir(target, { recursive: true })
+    for (const file of files) {
+      await fs.copyFile(join(BUNDLED_TALES_DIR, file), join(target, file))
+    }
+    logger.info('汤库为空，已铺入 %d 锅内置样例汤到 %s', files.length, target)
+    return files.length
+  } catch (error) {
+    logger.warn('内置样例汤铺入失败：%s', (error as Error).message)
+    return 0
+  }
+}
+
 async function readTaleFiles(dir: string): Promise<Array<{ file: string; raw: unknown }>> {
   const out: Array<{ file: string; raw: unknown }> = []
   let entries: string[]

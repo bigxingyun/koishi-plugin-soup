@@ -45,7 +45,7 @@ npm i @bigxingyun/koishi-plugin-soup
 
 1. **填 API Key**：配置项 `apiKey`（或环境变量 `DEEPSEEK_API_KEY`）
 2. **绑主人**：群里发 `海龟汤 主人 绑定`，到**控制台日志**里取 6 位密钥，再发 `海龟汤 主人 绑定 <密钥>`
-3. **放汤**：把 JSON 汤文件放进 `data/soup/tales/`，或发 `海龟汤 汤库 重载`
+3. **放汤**：首次启动会自动铺 3 锅样例汤到 `data/soup/tales/`，可随意删改；也可自己放 JSON 后发 `海龟汤 汤库 重载`
 
 想要出图，额外装 `koishi-plugin-puppeteer`（可选，没装只发文本）。
 
@@ -70,6 +70,7 @@ npm i @bigxingyun/koishi-plugin-soup
 | `海龟汤 汤库` | 汤库列表（`列表` / `查看` / `启用` / `停用` / `删除` / `导入` / `重载`） |
 | `海龟汤 主人` | 绑定与设置（`绑定` / `解绑` / `设置`） |
 | `海龟汤 渲染` | 出图状态（`状态` / `测试` / `开启` / `关闭` / `主题`） |
+| `海龟汤 诊断 [-f]` | 测 AI 站点连通性：Key、`/models`、模型名、能否真正跑一次推理 |
 
 旧写法 `海龟汤 绑定`、`海龟汤 设置` 仍可用一次，会提示迁移到三段式。
 
@@ -121,6 +122,7 @@ npm i @bigxingyun/koishi-plugin-soup
 | `passThreshold` | `0.8` | 通过相似度 |
 | `renderMode` | `image-first` | 图片优先，失败降级文本 |
 | `renderFormat` | `jpg` | PNG 体积约为 JPEG 的 6 倍 |
+| `seedBundled` | `true` | 汤库为空时自动铺 3 锅内置样例汤 |
 
 全部 44 项配置及默认值见[需求规格](https://github.com/bigxingyun/koishi-plugin-soup/blob/main/需求分析.md) §7。
 
@@ -175,6 +177,7 @@ npm run verify:render      # 或：$env:CHROME_PATH="D:\chrome\chrome.exe"; node
 
 ## 更新日志
 
+- **0.2.0** — 内置 3 锅样例汤随包发布，首次启动自动铺入；新增 `海龟汤 诊断` 站点连通性测试；AI 输出的版面会做泄底检测
 - **0.1.1** — 数据目录改为 `data/soup/`（自动兼容老目录）；README 补效果图与 FAQ
 - **0.1.0** — 首个可用版本：三级指令、配额、AI 判词与评分、报纸图渲染与降级
 

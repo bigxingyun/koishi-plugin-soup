@@ -39,6 +39,18 @@ export interface ScoreResult {
   latencyMs: number
 }
 
+/** 站点连通性诊断结果：命令层直接照着渲染，不需要再判断 */
+export interface DiagnoseReport {
+  configured: boolean
+  baseURL: string
+  model: string
+  endpoint: { ok: boolean; status?: number; latencyMs: number; error?: string }
+  models: { ok: boolean; found?: boolean; sample?: string }
+  probe: { ok: boolean; latencyMs: number; error?: string } | { skipped: true }
+  callsToday: number
+  dailyCallLimit: number
+}
+
 const JUDGE_SYSTEM = `你是一款名为「海龟汤」的猜谜游戏的主持人。玩家只能通过提问来逼近真相，而你只能回答三类之一：是 / 不是 / 无关。
 
 【本场汤底 · 绝对保密】
@@ -176,6 +188,77 @@ export class AIClient {
   get callsToday(): number {
     this.rollDay()
     return this.used
+  }
+
+  /**
+   * 站点连通性诊断：依次检查「Key 是否配置 → /models 是否可达 → 模型名是否在列表里 → 能否完成一次推理」。
+   * 不抛异常，全部转成结构化结果，交给命令层渲染。
+   */
+  async diagnose(options: { skipProbe?: boolean } = {}): Promise<DiagnoseReport> {
+    const report: DiagnoseReport = {
+      configured: this.available,
+      baseURL: this.config.baseURL,
+      model: this.config.model,
+      endpoint: { ok: false, latencyMs: 0 },
+      models: { ok: false },
+      probe: options.skipProbe ? { skipped: true } : { ok: false, latencyMs: 0 },
+      callsToday: this.callsToday,
+      dailyCallLimit: this.config.dailyCallLimit,
+    }
+    if (!this.available) return report
+
+    // 1) GET /models：验证站点可达 + Key 有效 + 模型名存在
+    const started = Date.now()
+    const controller = new AbortController()
+    const dispose = this.ctx.setTimeout(() => controller.abort(), this.config.timeout * 1000)
+    try {
+      const response = await fetch(`${this.config.baseURL.replace(/\/+$/, '')}/models`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal: controller.signal,
+      })
+      report.endpoint.ok = response.ok
+      report.endpoint.status = response.status
+      report.endpoint.latencyMs = Date.now() - started
+
+      if (response.ok) {
+        const payload = await response.json() as { data?: Array<{ id?: string }> }
+        const ids = (payload.data ?? []).map((item) => String(item?.id ?? '')).filter(Boolean)
+        report.models.ok = true
+        report.models.found = ids.includes(this.config.model)
+        report.models.sample = ids.slice(0, 3).join(', ')
+      } else if (response.status === 401 || response.status === 403) {
+        report.endpoint.error = `HTTP ${response.status}（Key 无效）`
+      } else {
+        report.endpoint.error = `HTTP ${response.status}`
+      }
+    } catch (error) {
+      report.endpoint.latencyMs = Date.now() - started
+      report.endpoint.error = (error as Error).name === 'AbortError' ? '超时' : (error as Error).message
+    } finally {
+      dispose()
+    }
+
+    // 2) 真发一次最小请求：走完整 JSON 链路，验证模型确实能出结果
+    if (!options.skipProbe) {
+      const probeStart = Date.now()
+      try {
+        await this.chat(
+          '你是连通性探测助手。只输出一行 json：{"ok":true}',
+          'ping',
+          { maxTokens: 16 },
+        )
+        report.probe = { ok: true, latencyMs: Date.now() - probeStart }
+      } catch (error) {
+        report.probe = {
+          ok: false,
+          latencyMs: Date.now() - probeStart,
+          error: error instanceof AIError ? error.code : (error as Error).message,
+        }
+      }
+    }
+
+    report.callsToday = this.callsToday
+    return report
   }
 
   /** 底层调用：负责重试、超时、JSON 输出、空内容兜底 */

@@ -48,6 +48,7 @@ export interface Config {
   talesDir: string
   autoImport: boolean
   autoEnable: boolean
+  seedBundled: boolean
   ignoreLeakWarning: boolean
 
   // ---- 主人
@@ -150,6 +151,8 @@ export const Config: Schema<Config> = Schema.intersect([
       .description('启动时自动扫描导入'),
     autoEnable: Schema.boolean().default(true)
       .description('新导入的汤默认启用'),
+    seedBundled: Schema.boolean().default(true)
+      .description('汤库为空时自动铺一份内置样例汤（3 锅，可随意删改）'),
     ignoreLeakWarning: Schema.boolean().default(false)
       .description('忽略「汤面疑似泄底」告警'),
     masterAuthTTL: Schema.natural().min(60).max(3600).default(600)

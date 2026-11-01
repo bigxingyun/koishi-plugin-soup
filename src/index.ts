@@ -9,7 +9,7 @@ import {
   bindMaster, consumeCode, getMaster, issueCode, pendingKey, unbindMaster,
 } from './master'
 import { Renderer, buildNewspaperHTML, TEMPLATE_VERSION } from './render'
-import { importTales, listTales, resolveTalesDir, tellableTale } from './tale'
+import { importTales, listTales, resolveTalesDir, seedBundledTales, tellableTale } from './tale'
 import type { GameSession, Tale } from './types'
 import { formatDuration, splitMessage } from './util'
 
@@ -242,6 +242,8 @@ export function apply(ctx: Context, config: Config) {
   // ---------------------------------------------------------------- 生命周期
   ctx.on('ready', async () => {
     if (config.autoImport) {
+      // 先铺内置样例汤（只在汤库为空时铺），再扫库——否则新装用户一开局就是「汤库为空」
+      if (config.seedBundled) await seedBundledTales(ctx, config, logger)
       const report = await importTales(ctx, config, logger)
       if (report.errors.length) logger.warn('汤库有 %d 条失败记录', report.failed)
     }
@@ -737,4 +739,43 @@ export function apply(ctx: Context, config: Config) {
       return t(session, 'renderThemeSet', [theme])
     })
   })
+
+  // ---------------------------------------------------------------- 站点诊断
+  ctx.command('海龟汤.诊断', { authority: 1 })
+    .usage('检查 AI 站点连通性：Key、/models、模型名、能否真正跑通一次推理')
+    .option('fast', '-f, --fast 只测站点与模型列表，不做推理调用')
+    .action(async ({ session, options }) => {
+      if (!session) return
+      const report = await ai.diagnose({ skipProbe: !!options?.fast })
+
+      if (!report.configured) return t(session, 'diagNotConfigured')
+
+      const lines: string[] = [t(session, 'diagHeader', [report.baseURL, report.model])]
+
+      lines.push(report.endpoint.ok
+        ? t(session, 'diagEndpointOk', [report.endpoint.status ?? 200, report.endpoint.latencyMs])
+        : t(session, 'diagEndpointFail', [report.endpoint.error || 'unknown', report.endpoint.latencyMs]))
+
+      if (report.models.ok) {
+        lines.push(report.models.found
+          ? t(session, 'diagModelOk', [report.model])
+          : t(session, 'diagModelMissing', [report.models.sample || '—']))
+      } else if (!report.endpoint.ok) {
+        lines.push(t(session, 'diagModelsSkipped'))
+      }
+
+      if ('skipped' in report.probe) {
+        lines.push(t(session, 'diagProbeSkipped'))
+      } else {
+        lines.push(report.probe.ok
+          ? t(session, 'diagProbeOk', [report.probe.latencyMs])
+          : t(session, 'diagProbeFail', [report.probe.error || 'unknown']))
+      }
+
+      lines.push(t(session, 'diagQuota', [
+        report.callsToday,
+        report.dailyCallLimit > 0 ? String(report.dailyCallLimit) : '∞',
+      ]))
+      return lines.join('\n')
+    })
 }
