@@ -28,7 +28,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/unit.test.js tests/plugin.test.js tests/render.test.js tests/room.test.js tests/routing.test.js",
+    "test": "npm run build && node --test tests/unit.test.js tests/plugin.test.js tests/render.test.js tests/room.test.js tests/routing.test.js tests/image.test.js",
     "render:samples": "pwsh -File docs/render-sample/render.ps1"
   },
   "peerDependencies": {
