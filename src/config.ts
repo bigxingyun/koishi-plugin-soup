@@ -1,6 +1,6 @@
 import { Schema } from 'koishi'
 
-export const name = 'situation-puzzle'
+export const name = 'soup'
 
 export type RenderMode = 'image-first' | 'text'
 export type RenderBackend = 'auto' | 'puppeteer' | 'text'

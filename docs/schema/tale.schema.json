@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/bigxingyun/koishi-plugin-situation-puzzle/schema/tale.schema.json",
+  "$id": "https://github.com/bigxingyun/koishi-plugin-soup/schema/tale.schema.json",
   "title": "Situation Puzzle Tale / 海龟汤汤文件",
   "type": "object",
   "required": ["taleId", "title", "surface", "answer"],

@@ -46,7 +46,7 @@ export function apply(ctx: Context, config: Config) {
   ctx.i18n.define('en-US', enUS)
   setupModel(ctx)
 
-  const logger = ctx.logger('situation-puzzle')
+  const logger = ctx.logger('soup')
   const ai = new AIClient(ctx, config, logger)
   const game = new Game(ctx, config, logger, ai)
   // puppeteer 是可选服务：不能直接写进 inject.optional（那样会被 cordis 遮罩成 undefined），

@@ -1,8 +1,13 @@
-# koishi-plugin-situation-puzzle
+# @bigxingyun/koishi-plugin-soup
 
-> 让 bot 变成 AI 海龟汤主持人：玩家问「是 / 不是 / 无关」，用文字提交推理拿相似度，汤面做成一张做旧报纸。
+> 把 Koishi 机器人变成 24 小时在线的海龟汤主持人。
 
-[![npm](https://img.shields.io/badge/npm-koishi--plugin--situation--puzzle-cb3837)](https://www.npmjs.com/package/koishi-plugin-situation-puzzle)
+玩家只问「是 / 不是 / 无关」，AI 主持人当场给判词；提交推理时按「关键要素命中 + 语义一致」打出相似度分，过线即揭汤底。汤面默认印成一张做旧报纸号外，发不出去就自动退回文字——玩家不会察觉。
+
+不用等人主持、不用背汤底、不会说漏嘴。一锅汤十几分钟打完，适合群里随手开一局。
+
+[![npm](https://img.shields.io/npm/v/@bigxingyun/koishi-plugin-soup?color=cb3837)](https://www.npmjs.com/package/@bigxingyun/koishi-plugin-soup)
+[![license](https://img.shields.io/npm/l/@bigxingyun/koishi-plugin-soup)](LICENSE)
 
 ## 特性
 
@@ -16,7 +21,7 @@
 ## 安装
 
 ```sh
-npm i koishi-plugin-situation-puzzle
+npm i @bigxingyun/koishi-plugin-soup
 ```
 
 在 Koishi 控制台「插件配置」里启用，然后：

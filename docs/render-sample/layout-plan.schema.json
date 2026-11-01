@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/bigxingyun/koishi-plugin-situation-puzzle/schema/layout-plan.schema.json",
+  "$id": "https://github.com/bigxingyun/koishi-plugin-soup/schema/layout-plan.schema.json",
   "title": "LayoutPlan / 报纸版面规划",
   "description": "AI 只能产出这个结构；排版由 build.py 确定性地算。所有字段都有硬上限，越界会被夹紧并记 WARN。",
   "type": "object",

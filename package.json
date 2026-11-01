@@ -1,5 +1,5 @@
 {
-  "name": "koishi-plugin-situation-puzzle",
+  "name": "@bigxingyun/koishi-plugin-soup",
   "version": "0.1.0",
   "description": "AI 驱动的海龟汤主持人：是/不是/无关判词、相似度评分、做旧报纸汤面",
   "main": "lib/index.js",
@@ -10,11 +10,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bigxingyun/koishi-plugin-situation-puzzle.git"
+    "url": "git+https://github.com/bigxingyun/koishi-plugin-soup.git"
   },
-  "homepage": "https://github.com/bigxingyun/koishi-plugin-situation-puzzle#readme",
+  "homepage": "https://github.com/bigxingyun/koishi-plugin-soup#readme",
   "bugs": {
-    "url": "https://github.com/bigxingyun/koishi-plugin-situation-puzzle/issues"
+    "url": "https://github.com/bigxingyun/koishi-plugin-soup/issues"
   },
   "keywords": [
     "chatbot",
