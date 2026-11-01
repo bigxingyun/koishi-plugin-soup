@@ -34,3 +34,4 @@ docs/render-sample/_raw*.png
 
 # ---- 渲染样张：只提交压缩后的 jpg，png 仅本地生成 ----
 docs/render-sample/sample-*.png
+tests/.cache/

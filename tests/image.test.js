@@ -1,3 +1,5 @@
+const fs = require('node:fs/promises')
+
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
@@ -111,4 +113,41 @@ test('出图：-t 选项强制纯文本', async (t) => {
 
   assert.ok(joined.includes('测试之杯'))
   assert.ok(!/base64/i.test(joined), '-t 不应出图')
+})
+
+test('出图：同一锅汤第二次渲染命中缓存，不再调用后端', async (t) => {
+  stubFetch()
+  const app = new Context()
+  app.plugin(mock)
+  app.plugin(memory)
+
+  let renders = 0
+  app.set('puppeteer', {
+    render: async () => {
+      renders++
+      return FAKE_IMAGE
+    },
+  })
+  app.plugin(plugin, {
+    talesDir: 'tests/fixtures/tales',
+    apiKey: 'sk-test',
+    modelCheck: false,
+    autoImport: true,
+    renderCacheDir: 'tests/.cache',
+    renderCacheMaxMB: 50,
+    renderMode: 'image-first',
+  })
+  await app.start()
+  t.after(async () => {
+    await app.stop()
+    await fs.rm('tests/.cache', { recursive: true, force: true })
+  })
+
+  const client = app.mock.client('img4', 'img-room-4')
+  await client.receive('海龟汤 开局')
+  assert.equal(renders, 1, '首次开局应渲染一次')
+
+  await client.receive('海龟汤 汤面')
+  assert.equal(renders, 1, '第二次应命中缓存，不再渲染')
+  assert.ok(await fs.stat('tests/.cache').catch(() => null), '缓存目录应已写入')
 })

@@ -94,7 +94,7 @@ npm i koishi-plugin-situation-puzzle
 ```sh
 npm install
 npm run build      # 编译到 lib/
-npm test           # 26 个用例：单元 + mock 集成 + 渲染
+npm test           # 41 个用例：单元 + mock 集成 + 渲染 + 路由 + 出图
 npm run typecheck
 ```
 
